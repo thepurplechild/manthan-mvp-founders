@@ -29,6 +29,18 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "api/projects/request-upload-url/index.py": {
+      "maxDuration": 30,
+      "memory": 512
+    },
+    "api/projects/finalize-upload/index.py": {
+      "maxDuration": 60,
+      "memory": 512
+    },
+    "api/projects/run-packaging-agent/index.py": {
+      "maxDuration": 300,
+      "memory": 1536
+    },
     "app/api/**/route.ts": {
       "maxDuration": 30,
       "memory": 512

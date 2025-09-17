@@ -86,42 +86,112 @@ export default function ProjectUploadPage() {
   }
 
   const uploadFile = async (fileUpload: FileUpload) => {
-    setFiles(prev => prev.map(f => 
-      f.id === fileUpload.id 
+    setFiles(prev => prev.map(f =>
+      f.id === fileUpload.id
         ? { ...f, status: 'uploading', progress: 0, error: undefined, stuckRetryAttempted: false, queuedSince: null }
         : f
     ))
 
     try {
-      const fd = new FormData()
-      fd.append('file', fileUpload.file)
-      fd.append('project_id', projectId)
-      
-      const response = await fetch('/api/uploads', { method: 'POST', body: fd })
-      const result = await response.json()
+      // Step 1: Request signed URL for upload
+      const signedUrlResponse = await fetch('/api/projects/request-upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: fileUpload.file.name,
+          fileType: fileUpload.file.type,
+          projectId: projectId
+        })
+      })
 
-      if (!response.ok) {
-        setFiles(prev => prev.map(f => 
-          f.id === fileUpload.id 
-            ? { ...f, status: 'failed', error: result.error || 'Upload failed' }
+      const signedUrlResult = await signedUrlResponse.json()
+
+      if (!signedUrlResponse.ok) {
+        setFiles(prev => prev.map(f =>
+          f.id === fileUpload.id
+            ? { ...f, status: 'failed', error: signedUrlResult.error || 'Failed to get upload URL' }
             : f
         ))
         return
       }
 
-      setFiles(prev => prev.map(f => 
-        f.id === fileUpload.id 
-          ? { ...f, status: 'queued', progress: 10, ingestionId: result.ingestion_id, queuedSince: Date.now() }
+      // Update progress to 25% - got signed URL
+      setFiles(prev => prev.map(f =>
+        f.id === fileUpload.id
+          ? { ...f, progress: 25 }
           : f
       ))
 
-      // Start polling for this specific file
-      startPolling(fileUpload.id, result.ingestion_id)
+      // Step 2: Upload file directly to Supabase Storage using signed URL
+      const uploadResponse = await fetch(signedUrlResult.signedUrl, {
+        method: 'PUT',
+        body: fileUpload.file,
+        headers: {
+          'Content-Type': fileUpload.file.type || 'application/octet-stream',
+        }
+      })
+
+      if (!uploadResponse.ok) {
+        setFiles(prev => prev.map(f =>
+          f.id === fileUpload.id
+            ? { ...f, status: 'failed', error: 'Failed to upload file to storage' }
+            : f
+        ))
+        return
+      }
+
+      // Update progress to 75% - file uploaded
+      setFiles(prev => prev.map(f =>
+        f.id === fileUpload.id
+          ? { ...f, progress: 75 }
+          : f
+      ))
+
+      // Step 3: Finalize upload and trigger AI processing
+      const finalizeResponse = await fetch('/api/projects/finalize-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: projectId,
+          filePath: signedUrlResult.filePath,
+          fileName: fileUpload.file.name,
+          fileType: fileUpload.file.type,
+          fileSize: fileUpload.file.size
+        })
+      })
+
+      const finalizeResult = await finalizeResponse.json()
+
+      if (!finalizeResponse.ok) {
+        setFiles(prev => prev.map(f =>
+          f.id === fileUpload.id
+            ? { ...f, status: 'failed', error: finalizeResult.error || 'Failed to finalize upload' }
+            : f
+        ))
+        return
+      }
+
+      // Update to queued status and start polling
+      setFiles(prev => prev.map(f =>
+        f.id === fileUpload.id
+          ? {
+              ...f,
+              status: 'queued',
+              progress: 100,
+              ingestionId: finalizeResult.ingestionId,
+              queuedSince: Date.now()
+            }
+          : f
+      ))
+
+      // Start polling for AI processing status
+      startPolling(fileUpload.id, finalizeResult.ingestionId)
 
     } catch (err) {
-      setFiles(prev => prev.map(f => 
-        f.id === fileUpload.id 
-          ? { ...f, status: 'failed', error: 'Network error occurred' }
+      console.error('Upload error:', err)
+      setFiles(prev => prev.map(f =>
+        f.id === fileUpload.id
+          ? { ...f, status: 'failed', error: 'Network error occurred during upload' }
           : f
       ))
     }
@@ -360,13 +430,20 @@ export default function ProjectUploadPage() {
 
                     {/* Success Actions */}
                     {fileUpload.status === 'succeeded' && fileUpload.ingestionId && (
-                      <div className="mt-2">
+                      <div className="mt-2 space-y-2">
+                        <div className="text-sm text-manthan-mint-700 bg-manthan-mint-50 p-2 rounded-lg">
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="w-4 h-4" />
+                            <span className="font-medium">AI Processing Complete!</span>
+                          </div>
+                          <p className="mt-1 text-xs">Your script has been analyzed and a comprehensive pitch deck has been generated with character bibles, series adaptation, and market positioning.</p>
+                        </div>
                         <Link
                           href={`/ingestion/results?ingestionId=${fileUpload.ingestionId}`}
                           className="text-manthan-mint-600 hover:text-manthan-mint-700 text-sm font-medium flex items-center space-x-1"
                         >
                           <CheckCircle className="w-4 h-4" />
-                          <span>View AI Processing Results</span>
+                          <span>View Generated Pitch Materials</span>
                           <ArrowRight className="w-3 h-3" />
                         </Link>
                       </div>
