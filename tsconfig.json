@@ -1,0 +1,49 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+
+    "module": "esnext",
+    "moduleResolution": "bundler",
+
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "useUnknownInCatchVariables": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
+
+    "typeRoots": ["./types", "./node_modules/@types"],
+    "types": ["node"],
+
+    "plugins": [
+      { "name": "next" }
+    ]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "tests",
+    "__tests__",
+    "playwright.config.*",
+    "backend"
+  ]
+}

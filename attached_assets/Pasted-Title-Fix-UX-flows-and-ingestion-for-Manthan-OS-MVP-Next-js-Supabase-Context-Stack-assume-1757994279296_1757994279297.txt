@@ -1,0 +1,94 @@
+Title: Fix UX, flows, and ingestion for Manthan OS MVP (Next.js + Supabase)
+
+Context / Stack (assume unless repo says otherwise):
+	•	Frontend: Next.js (App Router), TypeScript, Tailwind.
+	•	Auth/DB/Storage: Supabase.
+	•	Ingestion: API route → queue/job runner → storage → DB rows with status (queued, processing, done, error).
+	•	Deployment target: Replit run; env in Replit Secrets.
+
+Primary Objectives (must all pass before done):
+	1.	Verify all critical flows work end-to-end (signup/login, create project, upload files, view status, accept Creators Bill of Rights).
+	2.	Add/repair Create Project → Upload section with drag-and-drop, file list, progress, retries, and final “Done” state.
+	3.	Redesign text & buttons to match the theme and be readable (fix “white on white” for Creators Bill of Rights and anywhere else; enforce WCAG AA contrast).
+	4.	Creators Bill of Rights must be manually checked (required checkbox) before accepting/continuing; cannot proceed until checked. Persist acceptance per user.
+	5.	Remove double headers (some pages render two page titles/nav bars—dedupe and ensure a single consistent header layout).
+	6.	Ingestion stuck at 30% (queued)—identify root cause and fix. The progress UI must reflect real backend state; no infinite “queued”.
+
+Acceptance Criteria (QA-driven):
+	•	A. New user can sign up, verify, sign in, create a project, upload ≥3 files (mixed sizes), see accurate progress, and view “complete” with no console/network errors.
+	•	B. Creators Bill of Rights: contrast fixed; copy readable; required manual checkbox gating the “Accept & Continue” button. Acceptance stored in DB and respected across sessions.
+	•	C. No page shows duplicate headers/nav bars at any breakpoint.
+	•	D. Upload page shows drag-and-drop + file picker, per-file progress, cancel/retry. Disabled buttons behave correctly while uploading.
+	•	E. Ingestion pipeline advances files beyond “queued”: status transitions visible in UI; if a job stalls, a retry mechanism exists.
+	•	F. All colors meet WCAG AA contrast; add unit snapshot or visual checks where possible.
+	•	G. Add Playwright E2E tests that cover flows A–E. CI script runs them locally in Replit.
+
+Tasks & Implementation Details:
+	1.	Audit and fix double headers
+	•	Search for repeated <Header/>, <Navbar/>, or page-level <h1> rendered both in a root layout and per-page layout.
+	•	Consolidate into a single layout in app/layout.tsx (or per-section layout).
+	•	Ensure pages use a shared <PageHeader title="" description=""> component once.
+	2.	Theme & Contrast pass (esp. white-on-white)
+	•	Add Tailwind tokens (e.g., text-foreground, bg-background, btn-primary, btn-secondary) and ensure usage.
+	•	Set buttons to use high-contrast states with focus-visible rings.
+	•	Add a simple utility: ensureContrast(colorA, colorB) or rely on Tailwind classes; document chosen palette.
+	•	Specifically fix the Creators Bill of Rights section: no white-on-white, body text text-base md:text-[17px], line-height ≥ 1.6.
+	3.	Creators Bill of Rights gating
+	•	In the acceptance screen, add a required checkbox: “I have read and agree to the Creators Bill of Rights.”
+	•	Disable the “Accept & Continue” button until checked.
+	•	On click, persist { user_id, accepted_at, version } (e.g., table creator_rights_acceptances).
+	•	Gate downstream routes: if not accepted, redirect back to acceptance page.
+	4.	Create Project → Upload section
+	•	On “Create Project” success, route to /projects/[id]/upload.
+	•	Implement drag-and-drop + file picker with per-file rows: name, size, status, progress bar, cancel/retry.
+	•	Use Supabase Storage (or current storage) uploads with resumable/chunked if available.
+	•	Create ingestion_jobs table or use existing: write a row on enqueue; update progress as server/worker processes.
+	•	Add a lightweight status polling hook (SWR or interval) that reads job status and maps to UI progress.
+	5.	Fix ingestion stuck at 30% (queued)
+	•	Add server logs around enqueue/process/complete.
+	•	Check:
+	•	Do API routes write to queue?
+	•	Does a worker/cron/edge function pick jobs? If not, add a Replit background task or server endpoint to process.
+	•	Supabase RLS/Policies preventing updates? Adjust policies for the service role.
+	•	CORS or missing service_role key on server calls?
+	•	Implement a processor (server route or worker) that:
+	•	Dequeues queued jobs → sets processing → does parsing → sets done or error (with error_message).
+	•	Has backoff retries and marks error after N attempts.
+	•	Update the UI to reflect real statuses (no permanent 30%).
+	•	Provide a manual “Retry failed” action per file.
+	•	Expose a diagnostic panel (dev-only) showing counts by status.
+	6.	Flow QA & tests
+	•	Add Playwright E2E:
+	•	auth.spec.ts: signup → verify (mock), sign in, accept rights.
+	•	project-upload.spec.ts: create project → upload files → progress → done → retry scenario.
+	•	ui.spec.ts: ensure no double headers and contrast classes exist on critical pages (basic checks).
+	•	Add npm scripts: e2e, e2e:headed, test:ui (Vitest for unit checks if present).
+	7.	Copy & UI micro-content (edit if needed):
+	•	Buttons: “Accept & Continue”, “Upload Files”, “Add more files”, “Cancel”, “Retry”, “Done”.
+	•	Empty state: “Drag & drop files here or click to browse.”
+	•	Status chips: Queued, Processing, Done, Error – Retry available.
+	•	Creators Bill of Rights lead: “Please read and accept to continue. This protects creators and sets expectations.”
+
+Deliverables (commit all):
+	•	Code changes fixing headers, theme tokens, rights gating, upload UI, and ingestion worker.
+	•	DB migration/SQL for any new tables/policies (clearly commented).
+	•	.env.example updates noting required Supabase keys, buckets, service role.
+	•	Playwright tests & a short README “How to run tests locally on Replit”.
+	•	A markdown “Root Cause & Fix” note for the 30% queued issue, including logs/screenshots or example outputs.
+
+How to run locally (Replit):
+	•	Ensure Replit Secrets have SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE (server-only).
+	•	npm i
+	•	npm run dev (or the existing start command)
+	•	npx playwright install then npm run e2e (after boot)
+
+Non-negotiables:
+	•	Do not merge if any acceptance criteria fails.
+	•	Enforce the checkbox gate rigorously.
+	•	No white-on-white anywhere; maintain WCAG AA contrast.
+	•	Progress bars must reflect backend status, not guesses.
+
+Please proceed, make the changes, and provide:
+	1.	A summary of root cause(s) for the 30% queue stall and the exact fix.
+	2.	A list of files changed and high-level diffs.
+	3.	Confirmation that all 6 objectives and acceptance criteria A–G pass locally on Replit.
