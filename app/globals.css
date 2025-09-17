@@ -1,0 +1,303 @@
+/* Indian-inspired typography for media & entertainment */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme variables */
+    --background: 45 100% 97%; /* manthan-ivory-50 */
+    --foreground: 215 28% 17%; /* manthan-charcoal-800 */
+    --card: 45 60% 95%;
+    --card-foreground: 215 28% 17%;
+    --popover: 45 100% 97%;
+    --popover-foreground: 215 28% 17%;
+    --primary: 15 100% 60%; /* manthan-saffron-500 */
+    --primary-foreground: 45 100% 97%;
+    --secondary: 213 82% 33%; /* manthan-royal-500 */
+    --secondary-foreground: 45 100% 97%;
+    --muted: 45 40% 92%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 8 100% 75%; /* manthan-coral-400 */
+    --accent-foreground: 215 28% 17%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 45 100% 97%;
+    --border: 45 30% 87%;
+    --input: 45 30% 87%;
+    --ring: 15 100% 60%;
+    --chart-1: 15 100% 60%;
+    --chart-2: 213 82% 33%;
+    --chart-3: 172 81% 29%;
+    --chart-4: 162 73% 64%;
+    --chart-5: 8 100% 75%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 215 28% 17%;
+    --foreground: 45 100% 97%;
+    --card: 215 28% 17%;
+    --card-foreground: 45 100% 97%;
+    --popover: 215 28% 17%;
+    --popover-foreground: 45 100% 97%;
+    --primary: 15 100% 60%;
+    --primary-foreground: 215 28% 17%;
+    --secondary: 213 82% 33%;
+    --secondary-foreground: 45 100% 97%;
+    --muted: 215 20% 25%;
+    --muted-foreground: 215 16% 65%;
+    --accent: 8 100% 75%;
+    --accent-foreground: 215 28% 17%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 45 100% 97%;
+    --border: 215 20% 25%;
+    --input: 215 20% 25%;
+    --ring: 15 100% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-manthan-ivory-50 text-manthan-charcoal-800 font-sans;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading text-manthan-charcoal-800;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+  
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  /* Indian-inspired gradients */
+  .gradient-saffron {
+    background: linear-gradient(135deg, #FF6B35 0%, #FFD700 100%);
+  }
+  
+  .gradient-royal {
+    background: linear-gradient(135deg, #1E3A8A 0%, #0D9488 100%);
+  }
+  
+  .gradient-warm {
+    background: linear-gradient(135deg, #FF7F7F 0%, #6EE7B7 100%);
+  }
+  
+  .gradient-indian-sunset {
+    background: linear-gradient(135deg, #FF6B35 0%, #FFD700 50%, #FF7F7F 100%);
+  }
+  
+  .gradient-indian-bg {
+    background: linear-gradient(135deg, #FFFBF0 0%, #FEF7E0 50%, #FFEDD5 100%);
+  }
+  
+  /* Glass morphism effects */
+  .glass-indian {
+    backdrop-filter: blur(12px);
+    background: rgba(255, 251, 240, 0.85);
+    border: 1px solid rgba(255, 107, 53, 0.1);
+    box-shadow: 0 8px 32px rgba(255, 107, 53, 0.1);
+  }
+  
+  .glass-dark {
+    backdrop-filter: blur(12px);
+    background: rgba(31, 41, 55, 0.85);
+    border: 1px solid rgba(255, 215, 0, 0.1);
+  }
+  
+  /* Card effects with Indian aesthetics */
+  .card-indian {
+    @apply bg-white/80 backdrop-blur-md border border-manthan-saffron-200/30 rounded-2xl shadow-soft;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .card-indian:hover {
+    @apply shadow-indian transform -translate-y-1 border-manthan-saffron-300/50;
+  }
+  
+  .card-premium {
+    @apply bg-gradient-to-br from-manthan-gold-50 to-manthan-saffron-50 border border-manthan-gold-200/50 rounded-2xl shadow-gold;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .card-premium::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 215, 0, 0.2), transparent);
+    transition: left 0.5s;
+  }
+  
+  .card-premium:hover::before {
+    left: 100%;
+  }
+  
+  /* Button styles with Indian aesthetics */
+  .btn-indian {
+    @apply bg-gradient-to-r from-manthan-saffron-500 to-manthan-gold-500 text-white font-medium px-6 py-3 rounded-xl shadow-indian transition-all duration-300 hover:shadow-glow hover:scale-105 active:scale-95;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .btn-indian::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s;
+  }
+  
+  .btn-indian:hover::before {
+    left: 100%;
+  }
+  
+  .btn-royal {
+    @apply bg-gradient-to-r from-manthan-royal-500 to-manthan-teal-500 text-white font-medium px-6 py-3 rounded-xl shadow-soft transition-all duration-300 hover:shadow-lg hover:scale-105 active:scale-95;
+  }
+  
+  .btn-outline-indian {
+    @apply border-2 border-manthan-saffron-500 text-manthan-saffron-500 font-medium px-6 py-3 rounded-xl bg-transparent hover:bg-manthan-saffron-500 hover:text-white transition-all duration-300;
+  }
+  
+  /* Form elements with Indian styling */
+  .input-indian {
+    @apply bg-white/70 border-2 border-manthan-saffron-200/50 rounded-xl px-4 py-3 text-manthan-charcoal-800 placeholder-manthan-charcoal-400 focus:border-manthan-saffron-500 focus:ring-2 focus:ring-manthan-saffron-200 focus:bg-white transition-all duration-300;
+  }
+  
+  .input-indian:focus {
+    box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+  }
+  
+  /* Loading and animation utilities */
+  .animate-fadeIn {
+    animation: fadeIn 0.6s ease-out forwards;
+  }
+  
+  .animate-slideUp {
+    animation: slideUp 0.5s ease-out forwards;
+  }
+  
+  .animate-scaleIn {
+    animation: scaleIn 0.3s ease-out forwards;
+  }
+  
+  /* Geometric pattern backgrounds */
+  .pattern-dots {
+    background-image: radial-gradient(circle, rgba(255, 107, 53, 0.1) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  
+  .pattern-grid {
+    background-image: linear-gradient(rgba(255, 107, 53, 0.1) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255, 107, 53, 0.1) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  
+  .pattern-diagonal {
+    background-image: repeating-linear-gradient(45deg, 
+                      rgba(255, 215, 0, 0.05) 0px, 
+                      rgba(255, 215, 0, 0.05) 2px, 
+                      transparent 2px, 
+                      transparent 12px);
+  }
+  
+  /* Text effects */
+  .text-shimmer {
+    background: linear-gradient(90deg, #1F2937, #FF6B35, #FFD700, #1F2937);
+    background-size: 400% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 3s ease-in-out infinite;
+  }
+  
+  .text-gradient-indian {
+    background: linear-gradient(135deg, #FF6B35, #FFD700, #FF7F7F);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  /* Navigation specific styles */
+  .nav-glass {
+    backdrop-filter: blur(20px);
+    background: rgba(255, 251, 240, 0.95);
+    border-bottom: 1px solid rgba(255, 107, 53, 0.1);
+  }
+  
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: #FFFBF0;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #FF6B35, #FFD700);
+    border-radius: 4px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #EA580C, #F59E0B);
+  }
+}
+
+@layer utilities {
+  /* Indian motif background utility (low-contrast) */
+  .bg-indian-motif {
+    background-image: url('/patterns/indian-motif.svg');
+    background-repeat: repeat;
+    background-size: 280px 280px;
+    opacity: 0.06;
+    pointer-events: none;
+  }
+
+  /* Accessibility utilities */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+  .data-saver * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  
+  /* Animation delay utilities */
+  .delay-100 { animation-delay: 0.1s; }
+  .delay-200 { animation-delay: 0.2s; }
+  .delay-300 { animation-delay: 0.3s; }
+  .delay-400 { animation-delay: 0.4s; }
+  .delay-500 { animation-delay: 0.5s; }
+}

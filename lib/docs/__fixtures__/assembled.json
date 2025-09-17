@@ -1,0 +1,39 @@
+{
+  "projectTitle": "Sitar Strings",
+  "creator": "A. Sharma",
+  "contact": { "email": "creator@example.com", "phone": "+91-90000-00000" },
+  "core": {
+    "logline": "An ambitious sitar prodigy from Varanasi must choose between family tradition and a global stage.",
+    "synopsis": "Born to a lineage of classical musicians, Meera dreams of fusing Hindustani ragas with modern electronica. When a Mumbai producer offers her a life-changing collaboration, she confronts community expectations and a protective father.\n\nSet against ghats and festival circuits, Meera navigates love, ambition, and identity—seeking harmony in dissonance.",
+    "themes": ["ambition", "identity", "tradition vs modernity"],
+    "genres": ["Drama"],
+    "comps": ["Gully Boy", "Whiplash"]
+  },
+  "characters": {
+    "characters": [
+      { "name": "Meera", "arc": "doubt to purpose", "cultural_context": "Banaras gharana", "description": "Gifted sitar player torn between tradition and innovation" },
+      { "name": "Raghav", "arc": "rigidity to acceptance", "cultural_context": "Father, maestro", "description": "Meera's father and guru" },
+      { "name": "Neel", "arc": "outsider to ally", "cultural_context": "Mumbai producer", "description": "A visionary collaborator" }
+    ]
+  },
+  "market": {
+    "recommendations": [
+      { "platform": "Netflix India", "note": "Youth-skewing premium drama" },
+      { "platform": "Amazon Prime Video", "note": "Music-centric originals" }
+    ],
+    "variants": [ { "format": "OTT", "angle": "6x45 drama" } ]
+  },
+  "pitch": {
+    "sections": [
+      { "title": "Hook", "bullets": ["Music + Identity + Youth"], "notes": "Lean into festival and urban circuits" },
+      { "title": "Why Now", "bullets": ["Rise of indie fusion"], "notes": "Leverage streaming music culture" }
+    ]
+  },
+  "visuals": {
+    "scenes": [
+      { "prompt": "Golden sunrise at Assi Ghat, sitar silhouette", "style": "warm, saffron hue" },
+      { "prompt": "Royal blue concert hall with spotlight", "style": "minimalist, cinematic" }
+    ]
+  }
+}
+

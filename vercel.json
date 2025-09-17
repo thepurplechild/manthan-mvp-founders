@@ -1,0 +1,96 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "devCommand": "npm run dev",
+
+  "functions": {
+    "app/api/ingest/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    },
+    "app/api/process-script/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    },
+    "app/api/ingestions/run/route.ts": {
+      "maxDuration": 25,
+      "memory": 1024
+    },
+    "app/api/generate-documents/route.ts": {
+      "maxDuration": 20,
+      "memory": 512
+    },
+    "app/api/ai/**/route.ts": {
+      "maxDuration": 15,
+      "memory": 512
+    },
+    "app/api/**/route.ts": {
+      "maxDuration": 10,
+      "memory": 256
+    }
+  },
+
+  "regions": ["iad1"],
+  "framework": "nextjs",
+
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization, X-Requested-With"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        }
+      ]
+    }
+  ],
+
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    }
+  ],
+
+  "redirects": [
+    {
+      "source": "/docs",
+      "destination": "/dashboard",
+      "permanent": false
+    }
+  ],
+
+  "build": {
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=4096"
+    }
+  },
+
+  "crons": [
+    {
+      "path": "/api/cron/process-jobs",
+      "schedule": "* * * * *"
+    }
+  ]
+}

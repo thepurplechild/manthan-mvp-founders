@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="280" viewBox="0 0 280 280" fill="none">
+  <rect width="280" height="280" fill="#FFFBF0"/>
+  <!-- Low-contrast Indian geometric motif: interlaced circles and diamonds -->
+  <g opacity="0.35">
+    <!-- Saffron circles -->
+    <g stroke="#FF6B35" stroke-width="0.8">
+      <circle cx="70" cy="70" r="32" fill="none"/>
+      <circle cx="210" cy="70" r="32" fill="none"/>
+      <circle cx="70" cy="210" r="32" fill="none"/>
+      <circle cx="210" cy="210" r="32" fill="none"/>
+    </g>
+    <!-- Gold diamonds -->
+    <g stroke="#FFD700" stroke-width="0.8">
+      <path d="M140 20 L160 40 L140 60 L120 40 Z" fill="none"/>
+      <path d="M140 220 L160 240 L140 260 L120 240 Z" fill="none"/>
+      <path d="M20 140 L40 160 L60 140 L40 120 Z" fill="none"/>
+      <path d="M220 140 L240 160 L260 140 L240 120 Z" fill="none"/>
+    </g>
+    <!-- Royal blue accents -->
+    <g stroke="#1E3A8A" stroke-width="0.6">
+      <line x1="0" y1="0" x2="280" y2="280" />
+      <line x1="0" y1="280" x2="280" y2="0" />
+    </g>
+    <!-- Teal dots at intersections -->
+    <g fill="#0D9488">
+      <circle cx="140" cy="140" r="2" />
+      <circle cx="40" cy="40" r="1.5" />
+      <circle cx="240" cy="40" r="1.5" />
+      <circle cx="40" cy="240" r="1.5" />
+      <circle cx="240" cy="240" r="1.5" />
+    </g>
+  </g>
+</svg>
+
