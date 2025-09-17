@@ -1,0 +1,100 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "devCommand": "npm run dev",
+
+  "functions": {
+    "app/api/cron/process-jobs/route.ts": {
+      "maxDuration": 300,
+      "memory": 1536
+    },
+    "app/api/ingest/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "app/api/process-script/route.ts": {
+      "maxDuration": 300,
+      "memory": 1536
+    },
+    "app/api/ingestions/run/route.ts": {
+      "maxDuration": 300,
+      "memory": 1536
+    },
+    "app/api/generate-documents/route.ts": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
+    "app/api/ai/**/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "app/api/**/route.ts": {
+      "maxDuration": 30,
+      "memory": 512
+    }
+  },
+
+  "regions": ["iad1"],
+  "framework": "nextjs",
+
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization, X-Requested-With"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        }
+      ]
+    }
+  ],
+
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    }
+  ],
+
+  "redirects": [
+    {
+      "source": "/docs",
+      "destination": "/dashboard",
+      "permanent": false
+    }
+  ],
+
+  "build": {
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=4096"
+    }
+  },
+
+  "crons": [
+    {
+      "path": "/api/cron/process-jobs",
+      "schedule": "* * * * *"
+    }
+  ]
+}

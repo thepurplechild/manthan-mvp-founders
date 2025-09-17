@@ -1,0 +1,15 @@
+# env & secrets
+.env
+.env.*.local
+.supabase
+replit.nix
+# build artifacts
+.next
+dist
+out
+coverage
+playwright-report
+# local tools
+node_modules
+.DS_Store
+.vercel
