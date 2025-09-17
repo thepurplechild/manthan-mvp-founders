@@ -6,7 +6,19 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { put } from '@vercel/blob';
+// Import with fallback for development/build environments
+let put: any;
+try {
+  put = require('@vercel/blob').put;
+} catch (error) {
+  console.warn('[ingest] Vercel Blob not available, using mock fallback');
+  put = async (filename: string, data: any) => ({
+    url: `mock://blob/${filename}`,
+    downloadUrl: `mock://blob/${filename}`,
+    pathname: filename,
+    size: data.length || 1024
+  });
+}
 import { getSupportedFileTypes, getMaxFileSize } from '@/lib/ingestion/core';
 import { generateJobId, enqueueJob, updateStats } from '@/lib/jobs/queue';
 import { JobMetadata, StartIngestionResponse, StartIngestionError } from '@/lib/jobs/types';

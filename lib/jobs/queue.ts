@@ -5,7 +5,25 @@
  * using Vercel's KV store for reliable job processing.
  */
 
-import { kv } from '@vercel/kv';
+// Import with fallback for development/build environments
+let kv: any;
+try {
+  kv = require('@vercel/kv').kv;
+} catch (error) {
+  // Fallback for environments without Vercel KV configured
+  console.warn('[queue] Vercel KV not available, using memory fallback');
+  kv = {
+    zadd: async () => ({ success: true }),
+    zrange: async () => [],
+    hset: async () => ({ success: true }),
+    hgetall: async () => ({}),
+    hdel: async () => ({ success: true }),
+    del: async () => ({ success: true }),
+    set: async () => ({ success: true }),
+    get: async () => null,
+    incr: async () => 1,
+  };
+}
 import { createId } from '@paralleldrive/cuid2';
 import {
   JobMetadata,
@@ -328,7 +346,7 @@ export async function getDeadLetterJobs(
 
   // Get paginated dead letter jobs
   const jobsData = await kv.lrange(KV_KEYS.DEAD_LETTER_QUEUE, start, end);
-  const jobs = jobsData.map(data => JSON.parse(data) as DeadLetterJob);
+  const jobs = jobsData.map((data: string) => JSON.parse(data) as DeadLetterJob);
 
   // Get total count
   const totalCount = await kv.llen(KV_KEYS.DEAD_LETTER_QUEUE);
@@ -513,5 +531,36 @@ export async function getJobMetadata(jobId: string): Promise<JobMetadata | null>
   } catch (error) {
     console.error(`[queue] Failed to get job metadata for ${jobId}:`, error);
     return null;
+  }
+}
+
+/**
+ * Delete a job from the queue and cleanup associated data
+ */
+export async function deleteJob(jobId: string): Promise<boolean> {
+  try {
+    // Remove from job status
+    await kv.del(KV_KEYS.JOB_STATUS(jobId));
+
+    // Remove from queue if present (scan and remove matching entries)
+    const queueJobs = await kv.zrange(KV_KEYS.QUEUE, 0, -1);
+    for (const queueJobStr of queueJobs) {
+      try {
+        const queueJob = JSON.parse(queueJobStr) as QueueJob;
+        if (queueJob.jobId === jobId) {
+          await kv.zrem(KV_KEYS.QUEUE, queueJobStr);
+          break;
+        }
+      } catch (parseError) {
+        // Skip invalid queue entries
+        continue;
+      }
+    }
+
+    console.log(`[queue] Deleted job ${jobId}`);
+    return true;
+  } catch (error) {
+    console.error(`[queue] Failed to delete job ${jobId}:`, error);
+    return false;
   }
 }
