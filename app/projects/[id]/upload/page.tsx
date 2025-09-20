@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Upload, CheckCircle, ArrowRight, X, FileText, AlertCircle, RefreshCw, Plus } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
 interface FileUpload {
   file: File
@@ -24,6 +25,23 @@ export default function ProjectUploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const activeIntervals = useRef<Map<string, NodeJS.Timeout>>(new Map())
+  const supabase = createClient()
+
+  // Helper function to get auth headers
+  const getAuthHeaders = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.access_token) {
+        return {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      }
+    } catch (error) {
+      console.error('Failed to get auth session:', error)
+    }
+    return { 'Content-Type': 'application/json' }
+  }
 
   // Cleanup all intervals on unmount
   useEffect(() => {
@@ -94,9 +112,10 @@ export default function ProjectUploadPage() {
 
     try {
       // Step 1: Request signed URL for upload
+      const authHeaders = await getAuthHeaders()
       const signedUrlResponse = await fetch('/api/projects/request-upload-url', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({
           fileName: fileUpload.file.name,
           fileType: fileUpload.file.type,
@@ -150,7 +169,7 @@ export default function ProjectUploadPage() {
       // Step 3: Finalize upload and trigger AI processing
       const finalizeResponse = await fetch('/api/projects/finalize-upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({
           projectId: projectId,
           filePath: signedUrlResult.filePath,

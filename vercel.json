@@ -41,6 +41,16 @@
       "maxDuration": 300,
       "memory": 1536
     },
+    "api/run-packaging-agent.py": {
+      "runtime": "python3.11",
+      "maxDuration": 180,
+      "memory": 1024
+    },
+    "api/packaging-worker.py": {
+      "runtime": "python3.11",
+      "maxDuration": 300,
+      "memory": 1536
+    },
     "app/api/**/route.ts": {
       "maxDuration": 30,
       "memory": 512
@@ -107,6 +117,10 @@
     {
       "path": "/api/cron/process-jobs",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/packaging-worker",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -82,8 +82,12 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/adm-zip": "^0.5.5",
     "@types/dompurify": "^3.0.5",
+    "@types/jest": "^30.0.0",
     "@types/lodash": "^4.14.202",
     "@types/node": "^20.19.14",
     "@types/pdf-parse": "^1.1.5",
@@ -96,10 +100,14 @@
     "eslint": "^9",
     "eslint-config-next": "15.3.1",
     "husky": "^9.1.6",
+    "jest": "^30.1.3",
+    "jest-environment-jsdom": "^30.1.2",
     "postcss": "^8",
+    "react-hook-form": "^7.63.0",
     "rimraf": "^6.0.1",
     "tailwindcss": "^3.4.1",
     "tailwindcss-animate": "^1.0.7",
+    "ts-jest": "^29.4.4",
     "ts-node": "^10.9.2",
     "typescript": "5.9.2"
   },
@@ -117,6 +125,33 @@
     ],
     "moduleNameMapper": {
       "^@/(.*)": "<rootDir>/$1"
+    },
+    "transform": {
+      "^.+\\.(ts|tsx)$": "ts-jest"
+    },
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js",
+      "jsx"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.(ts|tsx|js)",
+      "**/*.(test|spec).(ts|tsx|js)"
+    ],
+    "testPathIgnorePatterns": [
+      "/tests/e2e/"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.{ts,tsx}",
+      "!src/**/*.d.ts"
+    ],
+    "globals": {
+      "ts-jest": {
+        "tsconfig": {
+          "jsx": "react-jsx"
+        }
+      }
     }
   }
 }
