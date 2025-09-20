@@ -36,11 +36,132 @@ import {
   RETRY_DELAY_BASE
 } from './types';
 
+const INGESTION_QUEUE_KEY = process.env.KV_QUEUE_KEY || 'ingestions:pipeline:queue';
+
+type IngestionQueuePayload = {
+  queueId: string;
+  ingestionId: string;
+  projectId?: string | null;
+  userId?: string | null;
+  enqueuedAt: string;
+  attempts: number;
+};
+
+function logQueue(event: string, payload: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({
+      scope: 'queue',
+      event,
+      ts: new Date().toISOString(),
+      ...payload,
+    })
+  );
+}
+
 /**
  * Generate a unique job ID
  */
 export function generateJobId(): string {
   return `job_${createId()}`;
+}
+
+export interface EnqueueIngestionOptions {
+  ingestionId: string;
+  projectId?: string | null;
+  userId?: string | null;
+  attempts?: number;
+}
+
+export interface IngestionQueueItem extends EnqueueIngestionOptions {
+  queueId: string;
+  enqueuedAt: string;
+}
+
+export async function enqueueIngestionJob(options: EnqueueIngestionOptions): Promise<void> {
+  const queueItem: IngestionQueuePayload = {
+    queueId: `inq_${createId()}`,
+    ingestionId: options.ingestionId,
+    projectId: options.projectId ?? null,
+    userId: options.userId ?? null,
+    enqueuedAt: new Date().toISOString(),
+    attempts: options.attempts ?? 0,
+  };
+
+  const scoreBase = Date.now();
+
+  await kv.zadd(INGESTION_QUEUE_KEY, {
+    score: scoreBase,
+    member: JSON.stringify(queueItem),
+  });
+
+  logQueue('enqueue_ingestion', {
+    ingestion_id: queueItem.ingestionId,
+    queue_id: queueItem.queueId,
+    project_id: queueItem.projectId,
+    user_id: queueItem.userId,
+    attempts: queueItem.attempts,
+  });
+}
+
+export async function dequeueIngestionJobs(count: number): Promise<IngestionQueueItem[]> {
+  if (count <= 0) return [];
+
+  const items: IngestionQueueItem[] = [];
+
+  const parseMember = (member: string | null): IngestionQueueItem | null => {
+    if (!member) return null;
+    try {
+      const payload = JSON.parse(member) as IngestionQueuePayload;
+      return {
+        queueId: payload.queueId,
+        ingestionId: payload.ingestionId,
+        projectId: payload.projectId ?? null,
+        userId: payload.userId ?? null,
+        enqueuedAt: payload.enqueuedAt,
+        attempts: payload.attempts,
+      };
+    } catch (error) {
+      logQueue('dequeue_parse_error', { raw: member, err: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  };
+
+  let popped: string[] = [];
+  if (typeof kv.zpopmin === 'function') {
+    const raw = await kv.zpopmin(INGESTION_QUEUE_KEY, count);
+    if (Array.isArray(raw)) {
+      for (let idx = 0; idx < raw.length; idx += 2) {
+        popped.push(raw[idx] as string);
+      }
+    }
+  }
+
+  if (popped.length === 0) {
+    const fallbackMembers = await kv.zrange(INGESTION_QUEUE_KEY, 0, count - 1);
+    for (const member of fallbackMembers) {
+      await kv.zrem(INGESTION_QUEUE_KEY, member);
+      popped.push(member);
+    }
+  }
+
+  for (const member of popped) {
+    const item = parseMember(member);
+    if (item) {
+      items.push(item);
+      logQueue('dequeue_ingestion', {
+        ingestion_id: item.ingestionId,
+        queue_id: item.queueId,
+        attempts: item.attempts,
+      });
+    }
+  }
+
+  return items;
+}
+
+export async function ingestionQueueLength(): Promise<number> {
+  const len = await kv.zcard(INGESTION_QUEUE_KEY);
+  return typeof len === 'number' ? len : Number(len ?? 0);
 }
 
 /**

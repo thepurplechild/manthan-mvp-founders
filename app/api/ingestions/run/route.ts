@@ -1,259 +1,466 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-import { ingestFile } from '@/lib/ingestion/core'
-import { callClaude, safeParseJSON } from '@/lib/ai/anthropic'
-import { generatePitchPDF, generatePitchPPTX, generateSummaryDOCX, type PitchData } from '@/lib/generation/documents'
-import { generateVisualBrief, maybeGenerateImages } from '@/lib/generation/visuals'
-import { parseFile } from '@/lib/ingestion/parsers'
-import { rateLimit } from '@/lib/rate-limit'
+// Server-to-server ingestion processor. This endpoint is invoked by the cron worker
+// and requires the CRON_SECRET header. It bypasses RLS using the Supabase service
+// role key and must NEVER be exposed to end-users.
 
-type StepName = 'script_preprocess'|'core_extraction'|'character_bible'|'visuals'|'market_adaptation'|'package_assembly'|'final_package'
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
-  const { ingestion_id } = await req.json()
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-  const rl = rateLimit(`run:${ip}`, 20, 60000)
-  if (!rl.allowed) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { 'Retry-After': String(Math.ceil(rl.retryAfter/1000)) } })
-  }
-  if (!ingestion_id) return NextResponse.json({ error: 'Missing ingestion_id' }, { status: 400 })
+import { ingestFile } from '@/lib/ingestion/core';
+import { callClaude, safeParseJSON } from '@/lib/ai/anthropic';
+import {
+  generatePitchPDF,
+  generatePitchPPTX,
+  generateSummaryDOCX,
+  type PitchData,
+} from '@/lib/generation/documents';
+import { generateVisualBrief, maybeGenerateImages } from '@/lib/generation/visuals';
+import { getAdminClient } from '@/lib/supabase/admin';
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      }
-    }
-  )
+const STEP_SEQUENCE = [
+  'script_preprocess',
+  'core_extraction',
+  'character_bible',
+  'visuals',
+  'market_adaptation',
+  'package_assembly',
+  'final_package',
+] as const;
 
-  // Fetch ingestion & steps
-  const { data: ingestion, error } = await supabase.from('ingestions').select('*').eq('id', ingestion_id).single()
-  if (error || !ingestion) return NextResponse.json({ error: error?.message || 'Not found' }, { status: 404 })
+type StepName = (typeof STEP_SEQUENCE)[number];
 
-  // Update status running
-  await supabase.from('ingestions').update({ status: 'running', progress: 5 }).eq('id', ingestion_id)
+type StepStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
-  interface StepPatch {
-    status: 'running' | 'succeeded' | 'failed';
+function log(event: string, payload: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({
+      scope: 'run',
+      event,
+      ts: new Date().toISOString(),
+      ...payload,
+    })
+  );
+}
+
+async function updateStep(
+  supabase: ReturnType<typeof getAdminClient>,
+  ingestionId: string,
+  name: StepName,
+  patch: {
+    status: StepStatus;
     started_at?: string;
     finished_at?: string;
-    output?: Record<string, unknown>;
-    error?: string;
+    output?: Record<string, unknown> | null;
+    error?: string | null;
+  }
+) {
+  const payload = {
+    status: patch.status,
+    started_at: patch.started_at,
+    finished_at: patch.finished_at,
+    output: patch.output ?? undefined,
+    error: patch.error ?? undefined,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase
+    .from('ingestion_steps')
+    .update(payload)
+    .eq('ingestion_id', ingestionId)
+    .eq('name', name);
+
+  if (error) {
+    log('step_update_error', { ingestion_id: ingestionId, step: name, err: error.message });
+  }
+}
+
+async function updateIngestion(
+  supabase: ReturnType<typeof getAdminClient>,
+  ingestionId: string,
+  patch: Record<string, unknown>
+) {
+  const { error } = await supabase
+    .from('ingestions')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', ingestionId);
+
+  if (error) {
+    log('ingestion_update_error', { ingestion_id: ingestionId, err: error.message });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  if (!process.env.CRON_SECRET) {
+    log('config_error', { has_secret: false });
+    return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 });
   }
 
-  const updateStep = async (name: StepName, status: 'running'|'succeeded'|'failed', output?: Record<string, unknown>, err?: string) => {
-    const patch: StepPatch = { status }
-    if (status === 'running') {
-      patch.started_at = new Date().toISOString()
+  const headerSecret =
+    request.headers.get('x-cron-secret') ||
+    request.headers.get('authorization')?.replace('Bearer ', '') ||
+    '';
+
+  if (headerSecret !== process.env.CRON_SECRET) {
+    log('auth_failed', { provided: Boolean(headerSecret) });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let body: { ingestionId?: string; ingestion_id?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const ingestionId = body.ingestionId || body.ingestion_id;
+  if (!ingestionId) {
+    return NextResponse.json({ error: 'Missing ingestionId' }, { status: 400 });
+  }
+
+  const supabase = getAdminClient();
+
+  const { data: ingestion, error: fetchError } = await supabase
+    .from('ingestions')
+    .select('*')
+    .eq('id', ingestionId)
+    .maybeSingle();
+
+  if (fetchError || !ingestion) {
+    log('ingestion_missing', { ingestion_id: ingestionId, err: fetchError?.message });
+    return NextResponse.json({ error: 'Ingestion not found' }, { status: 404 });
+  }
+
+  log('start', {
+    ingestion_id: ingestionId,
+    project_id: ingestion.project_id,
+    user_id: ingestion.user_id,
+  });
+
+  await updateIngestion(supabase, ingestionId, {
+    status: 'processing',
+    progress: 5,
+    error: null,
+  });
+
+  const ensureStepsExist = async () => {
+    const missing: StepName[] = [];
+    const { data: existingSteps } = await supabase
+      .from('ingestion_steps')
+      .select('name')
+      .eq('ingestion_id', ingestionId);
+
+    const names = new Set((existingSteps || []).map((s) => s.name));
+    for (const step of STEP_SEQUENCE) {
+      if (!names.has(step)) missing.push(step);
     }
-    if (status === 'succeeded') {
-      patch.finished_at = new Date().toISOString()
-      patch.output = output || {}
+
+    if (missing.length > 0) {
+      await supabase.from('ingestion_steps').insert(
+        missing.map((name) => ({ ingestion_id: ingestionId, name, status: 'queued' }))
+      );
     }
-    if (status === 'failed') {
-      patch.finished_at = new Date().toISOString()
-      patch.error = err || 'failed'
-    }
-    await supabase.from('ingestion_steps').update(patch).eq('ingestion_id', ingestion_id).eq('name', name)
-  }
+  };
 
-  const setProgress = async (pct: number) => {
-    await supabase.from('ingestions').update({ progress: pct }).eq('id', ingestion_id)
-  }
+  await ensureStepsExist();
 
-  // Download source file from storage
-  // source_file_url stores the storage path
-  const path: string = ingestion.source_file_url
-  const dl = await supabase.storage.from('scripts').download(path)
-  if (dl.error) {
-    await supabase.from('ingestions').update({ status: 'failed', error: dl.error.message }).eq('id', ingestion_id)
-    return NextResponse.json({ error: dl.error.message }, { status: 500 })
-  }
-  const fileBlob = dl.data
-  const arrayBuf = await fileBlob.arrayBuffer()
-  const buffer = Buffer.from(arrayBuf)
+  const stepResults: Record<string, unknown> = {};
 
-  // Will collect artifact paths to persist in final package
-  let pdfDeckPath: string | null = null
-  let pptxDeckPath: string | null = null
-  let docxSummaryPath: string | null = null
+  const failIngestion = async (message: string) => {
+    await updateIngestion(supabase, ingestionId, {
+      status: 'failed',
+      error: message,
+      progress: ingestion.progress ?? 0,
+    });
+  };
 
   try {
-    await updateStep('script_preprocess','running')
-    const res = await ingestFile(path.split('/').pop() || 'script', buffer, undefined, { extractMetadata: true })
-    await updateStep('script_preprocess','succeeded', { metadata: res.content?.metadata, contentType: res.content?.contentType })
-    await setProgress(25)
+    const downloadStart = Date.now();
+    const { data: fileResponse, error: downloadError } = await supabase.storage
+      .from('scripts')
+      .download(ingestion.source_file_url);
 
-    await updateStep('core_extraction','running')
-    interface CoreData {
-      logline: string;
-      synopsis: string;
-      themes: string[];
-      characters: Array<{ name: string; description?: string }>;
-      genres?: string[];
-      title?: string;
-      [key: string]: unknown;
+    if (downloadError || !fileResponse) {
+      const msg = downloadError?.message || 'Unable to download source file';
+      await failIngestion(msg);
+      log('download_failed', { ingestion_id: ingestionId, err: msg });
+      return NextResponse.json({ error: msg }, { status: 500 });
     }
-    let core: CoreData
+
+    const arrayBuffer = await fileResponse.arrayBuffer();
+    const scriptBuffer = Buffer.from(arrayBuffer);
+
+    log('download_complete', {
+      ingestion_id: ingestionId,
+      duration_ms: Date.now() - downloadStart,
+      size: scriptBuffer.length,
+    });
+
+    // Step: script_preprocess
+    await updateStep(supabase, ingestionId, 'script_preprocess', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    });
+
+    const preprocess = await ingestFile(
+      ingestion.source_file_url.split('/').pop() || 'script',
+      scriptBuffer,
+      ingestion.mime_type || undefined,
+      { extractMetadata: true }
+    );
+
+    await updateStep(supabase, ingestionId, 'script_preprocess', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: {
+        metadata: preprocess.content?.metadata,
+        contentType: preprocess.content?.contentType,
+      },
+    });
+
+    await updateIngestion(supabase, ingestionId, { progress: 25 });
+
+    // Step: core_extraction
+    await updateStep(supabase, ingestionId, 'core_extraction', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    });
+
+    const scriptText = preprocess.content?.textContent || '';
+    let coreResult: Record<string, unknown> = {};
+
+    try {
+      if (process.env.ANTHROPIC_API_KEY && scriptText) {
+        const prompt = `You are given a screenplay or story text. Extract the following as strict JSON with keys: logline (string), synopsis (string, 2-4 paragraphs), themes (string[]), characters (array of objects with name and brief description). Respond ONLY with JSON and no prose.\n\nTEXT:\n${scriptText}`;
+        const { text } = await callClaude(
+          prompt,
+          'Extract core elements as JSON. Do not include extra commentary.',
+          1500
+        );
+        coreResult = safeParseJSON(text) || {};
+      } else {
+        coreResult = {
+          logline: preprocess.content?.metadata?.title || 'Untitled project logline pending',
+          synopsis: scriptText.slice(0, 1200),
+          themes: ['identity', 'family'],
+          characters: [],
+        };
+      }
+    } catch (error) {
+      log('core_extraction_error', {
+        ingestion_id: ingestionId,
+        err: error instanceof Error ? error.message : String(error),
+      });
+      coreResult = {
+        logline: preprocess.content?.metadata?.title || 'Untitled project logline pending',
+        synopsis: scriptText.slice(0, 1200),
+        themes: ['identity', 'family'],
+        characters: [],
+      };
+    }
+
+    stepResults.core = coreResult;
+
+    await updateStep(supabase, ingestionId, 'core_extraction', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: coreResult,
+    });
+
+    await updateIngestion(supabase, ingestionId, { progress: 45 });
+
+    // Step: character_bible
+    await updateStep(supabase, ingestionId, 'character_bible', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    });
+
+    let bible: Record<string, unknown> = {};
     try {
       if (process.env.ANTHROPIC_API_KEY) {
-        const scriptText = res.content?.textContent || ''
-        const input = scriptText.length > 0 ? scriptText : 'N/A'
-        const prompt = `You are given a screenplay or story text. Extract the following as strict JSON with keys: logline (string), synopsis (string, 2-4 paragraphs), themes (string[]), characters (array of objects with name and brief description). Respond ONLY with JSON and no prose.\n\nTEXT:\n${input}`
-        const { text } = await callClaude(prompt, 'Extract core elements as JSON. Do not include extra commentary.', 1500)
-        core = safeParseJSON(text) || {
-          logline: '', synopsis: '', themes: [], characters: []
-        }
+        const { text } = await callClaude(
+          `Using the following core elements JSON, generate a CHARACTER_BIBLE as strict JSON with keys: characters (array of objects each with name, motivations, conflicts, relationships (array), arc, cultural_context). Respond ONLY with JSON.\n\nCORE_ELEMENTS_JSON:\n${JSON.stringify(coreResult)}`,
+          'Expand core elements into a detailed character bible as JSON.',
+          1500
+        );
+        bible = safeParseJSON(text) || {};
       } else {
-        // Fallback stub
-        core = {
-          logline: res.content?.metadata.title ? `${res.content?.metadata.title} — a compelling story` : 'A compelling story',
-          synopsis: (res.content?.textContent || '').slice(0, 1200),
-          themes: ['ambition','identity','family'],
-          characters: []
-        }
+        bible = {
+          characters: [
+            {
+              name: 'Protagonist',
+              motivations: ['prove self'],
+              conflicts: ['family pressure'],
+              arc: 'from doubt to purpose',
+            },
+          ],
+        };
       }
-      await updateStep('core_extraction','succeeded', core)
-    } catch (err: unknown) {
-      // On error, persist failure but continue with stub to keep pipeline moving
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      await updateStep('core_extraction','failed', undefined, errorMessage)
-      core = {
-        logline: res.content?.metadata.title ? `${res.content?.metadata.title} — a compelling story` : 'A compelling story',
-        synopsis: (res.content?.textContent || '').slice(0, 1200),
-        themes: ['ambition','identity','family'],
-        characters: []
-      }
-      await updateStep('core_extraction','succeeded', core)
+    } catch (error) {
+      log('character_bible_error', {
+        ingestion_id: ingestionId,
+        err: error instanceof Error ? error.message : String(error),
+      });
+      bible = {
+        characters: [
+          {
+            name: 'Protagonist',
+            motivations: ['prove self'],
+            conflicts: ['family pressure'],
+            arc: 'from doubt to purpose',
+          },
+        ],
+      };
     }
-    await setProgress(45)
 
-    await updateStep('character_bible','running')
-    interface BibleData {
-      characters: Array<{
-        name: string;
-        motivations?: string[];
-        conflicts?: string[];
-        relationships?: string[];
-        arc?: string;
-        cultural_context?: string;
-      }>;
-      [key: string]: unknown;
-    }
-    let bible: BibleData | null = null
+    stepResults.bible = bible;
+
+    await updateStep(supabase, ingestionId, 'character_bible', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: bible,
+    });
+
+    await updateIngestion(supabase, ingestionId, { progress: 60 });
+
+    // Step: visuals
+    await updateStep(supabase, ingestionId, 'visuals', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    });
+
+    let visualsOutput: Record<string, unknown> = {};
     try {
-      if (process.env.ANTHROPIC_API_KEY) {
-        const prompt2 = `Using the following core elements JSON, generate a CHARACTER_BIBLE as strict JSON with keys: characters (array of objects each with name, motivations, conflicts, relationships (array), arc, cultural_context). Respond ONLY with JSON.\n\nCORE_ELEMENTS_JSON:\n${JSON.stringify(core)}`
-        const { text } = await callClaude(prompt2, 'Expand core elements into a detailed character bible as JSON.', 1500)
-        bible = safeParseJSON(text) || { characters: [] }
-      } else {
-        bible = { characters: [{ name: 'Protagonist', motivations: ['prove self'], conflicts: ['family pressure'], relationships: [], arc: 'from doubt to purpose', cultural_context: 'Indian, middle-class urban milieu' }] }
-      }
-      await updateStep('character_bible','succeeded', bible)
-
-      // After Step 2: generate documents and upload to Supabase Storage
-      try {
-        const coreData = core || {}
-        const pd: PitchData = {
-          title: ingestion?.title || coreData.title || ingestion?.source_file_url?.split('/').pop() || 'Pitch Deck',
-          logline: coreData.logline,
-          synopsis: coreData.synopsis,
-          themes: coreData.themes,
-          genres: coreData.genres,
-          characters: bible?.characters || [],
-          marketTags: ['Bollywood', 'INR', '₹']
-        }
-
-        const [pdfBuf, pptxBuf, docxBuf] = await Promise.all([
-          generatePitchPDF(pd),
-          generatePitchPPTX(pd),
-          generateSummaryDOCX(pd)
-        ])
-
-        const baseDir = `generated-assets/${ingestion.user_id}/${ingestion_id}`
-        pdfDeckPath = `${baseDir}/pitch.pdf`
-        pptxDeckPath = `${baseDir}/pitch.pptx`
-        docxSummaryPath = `${baseDir}/summary.docx`
-
-        await supabase.storage.from('generated-assets').upload(pdfDeckPath, pdfBuf, { contentType: 'application/pdf', upsert: true })
-        await supabase.storage.from('generated-assets').upload(pptxDeckPath, pptxBuf, { contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', upsert: true })
-        await supabase.storage.from('generated-assets').upload(docxSummaryPath, docxBuf, { contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', upsert: true })
-      } catch {
-        // Non-fatal: continue pipeline
-      }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      await updateStep('character_bible','failed', undefined, errorMessage)
-      bible = { characters: [{ name: 'Protagonist', arc: 'from doubt to purpose' }] }
-      await updateStep('character_bible','succeeded', bible)
+      visualsOutput = await generateVisualBrief(coreResult, bible);
+      visualsOutput.images = await maybeGenerateImages(visualsOutput as Record<string, unknown>);
+    } catch (error) {
+      log('visuals_error', {
+        ingestion_id: ingestionId,
+        err: error instanceof Error ? error.message : String(error),
+      });
+      visualsOutput = { concepts: [] };
     }
-    await setProgress(60)
 
-    // Visuals step (after character bible)
-    await updateStep('visuals','running')
+    stepResults.visuals = visualsOutput;
+
+    await updateStep(supabase, ingestionId, 'visuals', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: visualsOutput,
+    });
+
+    await updateIngestion(supabase, ingestionId, { progress: 70 });
+
+    // Step: market_adaptation (placeholder)
+    await updateStep(supabase, ingestionId, 'market_adaptation', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    });
+
+    const marketAdaptation = {
+      recommendations: [
+        { platform: 'Netflix', rationale: 'Strong family drama slate needs fresh voices' },
+        { platform: 'Amazon', rationale: 'Action beat resonates with current India Originals push' },
+      ],
+    };
+
+    stepResults.market = marketAdaptation;
+
+    await updateStep(supabase, ingestionId, 'market_adaptation', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: marketAdaptation,
+    });
+
+    await updateIngestion(supabase, ingestionId, { progress: 80 });
+
+    // Step: package_assembly
+    await updateStep(supabase, ingestionId, 'package_assembly', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    });
+
+    const pitchData: PitchData = {
+      title:
+        ingestion.title ||
+        (coreResult.title as string | undefined) ||
+        ingestion.source_file_url.split('/').pop() ||
+        'Pitch Deck',
+      logline: (coreResult.logline as string) || '',
+      synopsis: (coreResult.synopsis as string) || '',
+      themes: (coreResult.themes as string[]) || [],
+      genres: (coreResult.genres as string[]) || [],
+      characters: (bible.characters as unknown[]) || [],
+      marketTags: (marketAdaptation.recommendations || []).map((r) => r.platform),
+    };
+
+    const baseDir = `generated-assets/${ingestion.user_id}/${ingestionId}`;
     try {
-      // Re-parse to get structured scenes (best-effort)
-      const ext = (path.split('.').pop() || '').toLowerCase()
-      type SupportedFileType = '.txt' | '.pdf' | '.fdx' | '.celtx' | '.docx' | '.pptx' | '.ppt';
-      const fileType = (ext.startsWith('p') ? `.p${ext.slice(1)}` : `.${ext}`) as SupportedFileType
-      const parsed = await parseFile(path.split('/').pop() || 'script', buffer, fileType)
-      const brief = generateVisualBrief(parsed.structuredContent || null)
-      // Optionally call image API (mock)
-      const generated = await maybeGenerateImages(brief.scenes.flatMap(s => s.prompts.slice(0, 1)))
-      const visualsOut = { brief, generated }
-      await updateStep('visuals','succeeded', visualsOut)
-    } catch (vErr: unknown) {
-      const errorMessage = vErr instanceof Error ? vErr.message : String(vErr);
-      await updateStep('visuals','failed', undefined, errorMessage)
-      await updateStep('visuals','succeeded', { brief: { scenes: [] }, generated: [] })
+      const [pdfBuffer, pptxBuffer, docxBuffer] = await Promise.all([
+        generatePitchPDF(pitchData),
+        generatePitchPPTX(pitchData),
+        generateSummaryDOCX(pitchData),
+      ]);
+
+      await supabase.storage
+        .from('generated-assets')
+        .upload(`${baseDir}/pitch.pdf`, pdfBuffer, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+      await supabase.storage
+        .from('generated-assets')
+        .upload(`${baseDir}/pitch.pptx`, pptxBuffer, {
+          contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          upsert: true,
+        });
+      await supabase.storage
+        .from('generated-assets')
+        .upload(`${baseDir}/summary.docx`, docxBuffer, {
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          upsert: true,
+        });
+
+      stepResults.assets = {
+        pdf: `${baseDir}/pitch.pdf`,
+        pptx: `${baseDir}/pitch.pptx`,
+        docx: `${baseDir}/summary.docx`,
+      };
+    } catch (error) {
+      log('asset_upload_error', {
+        ingestion_id: ingestionId,
+        err: error instanceof Error ? error.message : String(error),
+      });
     }
 
-    await setProgress(68)
+    await updateStep(supabase, ingestionId, 'package_assembly', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: stepResults.assets || {},
+    });
 
-    await updateStep('market_adaptation','running')
-    const market = { recommendations: [{ platform: 'Disney+ Hotstar', note: 'Family-friendly positioning' }] }
-    await updateStep('market_adaptation','succeeded', market)
-    await setProgress(78)
+    await updateIngestion(supabase, ingestionId, { progress: 93 });
 
-    await updateStep('package_assembly','running')
-    const outline = { deck_outline: ['Title','Logline','Synopsis','Characters','Market Fit','Budget'], budget: { range: '₹1Cr–₹5Cr' } }
-    await updateStep('package_assembly','succeeded', outline)
-    await setProgress(90)
+    // Final package marker
+    await updateStep(supabase, ingestionId, 'final_package', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: {
+        ready: true,
+        assets: stepResults.assets,
+      },
+    });
 
-    await updateStep('final_package','running')
-    const pkgSummary = { summary: { ...core, ...bible, ...market, ...outline } }
-    // Optionally: upload a JSON summary as artifact
-    const artifactPath = `generated-assets/${ingestion.user_id}/${ingestion_id}/summary.json`
-    await supabase.storage.from('generated-assets').upload(artifactPath, Buffer.from(JSON.stringify(pkgSummary.summary, null, 2)), { contentType: 'application/json', upsert: true })
+    await updateIngestion(supabase, ingestionId, {
+      status: 'completed',
+      progress: 100,
+      error: null,
+    });
 
-    interface Artifact {
-      path: string;
-      type: 'summary' | 'pdf_deck' | 'pptx_deck' | 'docx_summary';
-    }
-    const artifacts: Artifact[] = [{ path: artifactPath, type: 'summary' }]
-    if (pdfDeckPath) artifacts.push({ path: pdfDeckPath, type: 'pdf_deck' })
-    if (pptxDeckPath) artifacts.push({ path: pptxDeckPath, type: 'pptx_deck' })
-    if (docxSummaryPath) artifacts.push({ path: docxSummaryPath, type: 'docx_summary' })
+    log('completed', { ingestion_id: ingestionId });
 
-    await supabase.from('packages').insert({
-      ingestion_id,
-      summary: pkgSummary.summary,
-      deck_url: pptxDeckPath || null,
-      document_url: docxSummaryPath || null,
-      artifacts
-    })
-    await updateStep('final_package','succeeded', { artifacts: [{ path: artifactPath }] })
-    await supabase.from('ingestions').update({ status: 'succeeded', progress: 100 }).eq('id', ingestion_id)
-
-    return NextResponse.json({ ok: true })
-  } catch (e: unknown) {
-    const errorMessage = e instanceof Error ? e.message : String(e);
-    await supabase.from('ingestions').update({ status: 'failed', error: errorMessage }).eq('id', ingestion_id)
-    return NextResponse.json({ error: errorMessage }, { status: 500 })
+    return NextResponse.json({ ok: true, ingestionId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown processor error';
+    log('fatal_error', { ingestion_id: ingestionId, err: message });
+    await failIngestion(message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

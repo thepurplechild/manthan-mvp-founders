@@ -1,74 +1,107 @@
-import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 
-import { getSupabaseClient } from './lib/auth/supabase-edge';
+const LOGIN_PATH = '/login';
+const NON_FOUNDER_REDIRECT = '/dashboard';
+const RIGHTS_ACCEPTANCE_PATH = '/auth/accept-rights';
 
-// Requires NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.
-const NON_FOUNDER_REDIRECT_PATH = '/403'; // Update if a dedicated /403 page is not available.
+function isAsset(pathname: string): boolean {
+  return (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/static') ||
+    pathname.match(/\.(.*)$/) !== null
+  );
+}
 
 export async function middleware(req: NextRequest) {
-  const pathname = req.nextUrl.pathname;
+  const { pathname } = req.nextUrl;
 
-  // Safety guard: the matcher already targets founder routes; this prevents accidental execution elsewhere.
-  if (!pathname.startsWith('/founder')) {
+  // Skip middleware for assets and non-protected routes
+  if (isAsset(pathname)) {
     return NextResponse.next();
   }
 
-  const origin = req.nextUrl.origin;
+  // Only apply middleware to founder routes and other protected routes
+  const isProtectedRoute = pathname.startsWith('/founder') ||
+                          pathname.startsWith('/dashboard') ||
+                          pathname.startsWith('/projects');
+
+  if (!isProtectedRoute) {
+    return NextResponse.next();
+  }
+
   const redirectTarget = `${pathname}${req.nextUrl.search}`;
-  const loginUrl = new URL('/login', origin);
-  loginUrl.searchParams.set('redirect', redirectTarget);
+  const url = req.nextUrl.clone();
 
-  const forbiddenUrl = new URL(NON_FOUNDER_REDIRECT_PATH, origin);
-
+  const cookieStore = await cookies();
   const response = NextResponse.next();
 
-  let supabase: ReturnType<typeof getSupabaseClient>;
-  try {
-    supabase = getSupabaseClient(req, response);
-  } catch (error) {
-    console.error('[middleware] Supabase configuration error', error);
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    const loginUrl = new URL(LOGIN_PATH, req.url);
+    loginUrl.searchParams.set('redirect', redirectTarget);
     return NextResponse.redirect(loginUrl);
   }
 
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-
-  if (sessionError) {
-    console.error('[middleware] Failed to fetch Supabase session', sessionError.message);
+  // Skip rights acceptance check for the acceptance page itself
+  if (pathname === RIGHTS_ACCEPTANCE_PATH) {
+    return response;
   }
 
-  const user = sessionData?.session?.user;
-  if (!user) {
-    return NextResponse.redirect(loginUrl);
+  // Check if user has accepted Creator's Bill of Rights
+  const { data: rightsAcceptance, error: rightsError } = await supabase
+    .from('creator_rights_acceptances')
+    .select('id')
+    .eq('user_id', session.user.id)
+    .single();
+
+  if (rightsError && rightsError.code === 'PGRST116') {
+    // No rights acceptance found - redirect to acceptance page
+    const acceptanceUrl = new URL(RIGHTS_ACCEPTANCE_PATH, req.url);
+    acceptanceUrl.searchParams.set('redirect', redirectTarget);
+    return NextResponse.redirect(acceptanceUrl);
   }
 
-  try {
+  // For founder routes, check role
+  if (pathname.startsWith('/founder')) {
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('role')
-      .eq('id', user.id)
-      .single();
+      .eq('id', session.user.id)
+      .maybeSingle();
 
-    if (profileError) {
-      console.error('[middleware] Unable to load profile role', profileError.message);
-      return NextResponse.redirect(forbiddenUrl);
+    if (profileError || !profile) {
+      return NextResponse.redirect(new URL(NON_FOUNDER_REDIRECT, req.url));
     }
 
-    if (!profile || profile.role !== 'founder') {
-      return NextResponse.redirect(forbiddenUrl);
+    if (profile.role !== 'founder') {
+      return NextResponse.redirect(new URL(NON_FOUNDER_REDIRECT, req.url));
     }
-  } catch (error) {
-    console.error('[middleware] Exception while validating founder access', error);
-    return NextResponse.redirect(forbiddenUrl);
   }
 
   return response;
 }
 
 export const config = {
-  /**
-   * Update matcher paths if the `(founder)` route group maps to different public URLs,
-   * e.g. ['/dashboard/:path*', '/projects/:path*'].
-   */
-  matcher: ['/founder/:path*'],
+  matcher: ['/founder/:path*', '/dashboard/:path*', '/projects/:path*'],
 };

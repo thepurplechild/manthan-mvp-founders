@@ -1,66 +1,97 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient as createServerClient } from '@/lib/supabase/server'
-import { rateLimit } from '@/lib/rate-limit'
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 
-export async function GET(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-  const rl = rateLimit(`pipeline-status:${ip}`, 60, 2000)
-  if (!rl.allowed) return NextResponse.json({ code: 'rate_limited', retryAfter: rl.retryAfter }, { status: 429 })
+function log(event: string, payload: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({ scope: 'status', event, ts: new Date().toISOString(), ...payload })
+  );
+}
 
-  const url = new URL(req.url)
-  const projectId = url.searchParams.get('projectId') || undefined
-  const ingestionId = url.searchParams.get('ingestionId') || undefined
-  if (!projectId && !ingestionId) return NextResponse.json({ code: 'bad_request', message: 'projectId or ingestionId required' }, { status: 400 })
+export async function GET(request: NextRequest) {
+  const search = request.nextUrl.searchParams;
+  const ingestionIdParam = search.get('ingestionId') || search.get('ingestion_id');
+  const projectIdParam = search.get('projectId');
 
-  const supabase = await createServerClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ code: 'unauthorized' }, { status: 401 })
+  if (!ingestionIdParam && !projectIdParam) {
+    return NextResponse.json({ error: 'ingestionId or projectId required' }, { status: 400 });
+  }
 
-  let ingestion: Record<string, unknown> | null = null
-  if (ingestionId) {
-    const { data } = await supabase.from('ingestions').select('*').eq('id', ingestionId).single()
-    ingestion = data
-  } else if (projectId) {
-    const { data } = await supabase
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => cookieStore.getAll(),
+        setAll: (cookiesToSet) => {
+          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
+        },
+      },
+    }
+  );
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let ingestionId = ingestionIdParam;
+
+  if (!ingestionId && projectIdParam) {
+    const { data: latest } = await supabase
       .from('ingestions')
-      .select('*')
-      .eq('project_id', projectId)
+      .select('id')
+      .eq('project_id', projectIdParam)
       .order('created_at', { ascending: false })
       .limit(1)
-      .maybeSingle()
-    ingestion = data
+      .maybeSingle();
+
+    ingestionId = latest?.id || null;
   }
-  if (!ingestion) return NextResponse.json({ code: 'not_found', message: 'No ingestion' }, { status: 404 })
 
-  const { data: steps } = await supabase
+  if (!ingestionId) {
+    return NextResponse.json({ error: 'No ingestion found' }, { status: 404 });
+  }
+
+  const { data: ingestion, error: ingestionError } = await supabase
+    .from('ingestions')
+    .select('*')
+    .eq('id', ingestionId)
+    .maybeSingle();
+
+  if (ingestionError || !ingestion) {
+    log('not_found', { ingestion_id: ingestionId, err: ingestionError?.message });
+    return NextResponse.json({ error: 'Ingestion not found' }, { status: 404 });
+  }
+
+  const { data: stepsData } = await supabase
     .from('ingestion_steps')
-    .select('*')
-    .eq('ingestion_id', ingestion.id)
-    .order('started_at', { ascending: true })
+    .select('name,status,started_at,finished_at,output,error')
+    .eq('ingestion_id', ingestionId)
+    .order('started_at', { ascending: true });
 
-  const { data: assets } = await supabase
-    .from('generated_assets')
-    .select('*')
-    .eq('project_id', ingestion.project_id)
-    .order('created_at', { ascending: false })
+  const steps = (stepsData || []).map((step) => ({
+    name: step.name,
+    status: step.status,
+    startedAt: step.started_at,
+    finishedAt: step.finished_at,
+    output: step.output,
+    error: step.error,
+  }));
 
-  // Map to client-friendly structure
-  const mapStep = (s: Record<string, unknown>) => ({
-    name: s.name,
-    status: s.status,
-    startedAt: s.started_at,
-    finishedAt: s.finished_at,
-    output: s.output,
-    error: s.error,
-  })
+  const activeStep = steps.find((step) => step.status === 'running')
+    || steps.find((step) => step.status === 'queued' || step.status === 'pending');
 
-  const result = {
-    ingestionId: ingestion.id,
+  const responsePayload = {
+    ingestionId,
     projectId: ingestion.project_id,
     status: ingestion.status,
     progress: ingestion.progress,
-    steps: (steps || []).map(mapStep),
-    assets: assets || [],
-  }
-  return NextResponse.json({ ok: true, data: result })
+    error: ingestion.error,
+    steps,
+    activeStep: activeStep ? { name: activeStep.name, status: activeStep.status } : null,
+  };
+
+  return NextResponse.json({ data: responsePayload });
 }

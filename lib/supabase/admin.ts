@@ -1,15 +1,27 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js'
-import { getServerEnv } from '@/lib/env'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-let admin: SupabaseClient | null = null
+let adminClient: SupabaseClient | null = null;
 
+/**
+ * Returns a singleton Supabase client configured with the service role key.
+ * This client bypasses RLS and MUST only be used in trusted server-to-server contexts.
+ */
 export function getAdminClient(): SupabaseClient {
-  if (admin) return admin
-  const env = getServerEnv()
-  // NEXT_PUBLIC_SUPABASE_URL is safe to read directly; server validator checks service key
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
-  admin = createClient(url, env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
-  return admin
+  if (adminClient) return adminClient;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceRole) {
+    throw new Error('Supabase admin client is not configured. Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.');
+  }
+
+  adminClient = createClient(url, serviceRole, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  return adminClient;
 }

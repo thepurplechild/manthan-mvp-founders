@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { JSONValue } from '@/types/common'
 
 export type StepStatus = 'queued'|'pending'|'running'|'failed'|'succeeded'|'skipped'|'completed'
-export type StepName = 'core_extraction'|'character_bible'|'market_adaptation'|'package_assembly'|'visuals'|'final_package'
+export type StepName = 'core_extraction'|'character_bible'|'market_adaptation'|'package_assembly'|'visuals'|'final_package'|'script_preprocess'
 
 export interface PipelineStep {
   name: StepName
@@ -21,7 +21,7 @@ export interface PipelineState {
   progress: number
   status: string
   steps: PipelineStep[]
-  assets: { storage_path?: string; kind?: string }[]
+  error?: string | null
 }
 
 export function usePipelineProgress(projectId: string | undefined) {
@@ -30,21 +30,29 @@ export function usePipelineProgress(projectId: string | undefined) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [docsReady, setDocsReady] = useState(false)
+  const [ingestionId, setIngestionId] = useState<string | null>(null)
 
   const fetchStatus = useCallback(async () => {
-    if (!projectId) return
+    if (!projectId && !ingestionId) return null
+    const params = new URLSearchParams()
+    if (ingestionId) params.set('ingestionId', ingestionId)
+    else if (projectId) params.set('projectId', projectId)
+
     try {
-      const res = await fetch(`/api/pipeline-status?projectId=${encodeURIComponent(projectId)}`, { cache: 'no-store' })
+      const res = await fetch(`/api/pipeline-status?${params.toString()}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`Status ${res.status}`)
       const json = await res.json()
-      setState(json.data)
-      return json.data as PipelineState
+      const payload = json.data as PipelineState | undefined
+      if (payload) {
+        setState(payload)
+        if (payload.ingestionId) setIngestionId(payload.ingestionId)
+      }
+      return payload ?? null
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
       return null
     }
-  }, [projectId])
+  }, [projectId, ingestionId])
 
   const start = useCallback(async () => {
     if (!projectId) return
@@ -53,6 +61,8 @@ export function usePipelineProgress(projectId: string | undefined) {
     try {
       const res = await fetch('/api/process-script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId }) })
       if (!res.ok) throw new Error(`Start failed: ${res.status}`)
+      const json = await res.json()
+      if (json?.ingestionId) setIngestionId(json.ingestionId)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -60,59 +70,25 @@ export function usePipelineProgress(projectId: string | undefined) {
     }
   }, [projectId])
 
-  const generateDocuments = useCallback(async (s: PipelineState) => {
-    // If already have assets, skip
-    if (!s || (s.assets && s.assets.length > 0)) return
-    // Find step outputs for assembly
-    const core = s.steps.find(x => x.name === 'core_extraction')?.output || {}
-    const characters = s.steps.find(x => x.name === 'character_bible')?.output || {}
-    const market = s.steps.find(x => x.name === 'market_adaptation')?.output || {}
-    const pitch = s.steps.find(x => x.name === 'package_assembly')?.output || {}
-    const visuals = s.steps.find(x => x.name === 'visuals')?.output || {}
-    if (!s.projectId) return
-    const cCore = core as Record<string, unknown>
-    const cChars = characters as Record<string, unknown>
-    const cMarket = market as Record<string, unknown>
-    const recs = (cMarket.recommendations as Array<{ platform: string }> | undefined) || []
-    const payload = {
-      projectId: s.projectId,
-      data: {
-        title: (cCore.title as string) || 'Pitch Deck',
-        logline: cCore.logline as string | undefined,
-        synopsis: cCore.synopsis as string | undefined,
-        themes: cCore.themes as string[] | undefined,
-        genres: cCore.genres as string[] | undefined,
-        characters: cChars.characters as unknown[] | undefined,
-        marketTags: recs.map((r) => r.platform)
-      }
-    }
-    const res = await fetch('/api/generate-documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-    if (res.ok) {
-      setDocsReady(true)
-      await fetchStatus()
-    }
-  }, [fetchStatus])
-
   useEffect(() => {
     if (!projectId) return
     let mounted = true
     ;(async () => {
       const current = await fetchStatus()
-      if (!current || current.status !== 'succeeded') {
+      if (!current || current.status !== 'completed') {
         await start()
       }
       if (pollRef.current) clearInterval(pollRef.current)
       pollRef.current = setInterval(async () => {
         const s = await fetchStatus()
-        const done = s && (s.status === 'succeeded' || s.steps?.every(st => st.status === 'succeeded'))
+        const done = s && (s.status === 'completed' || s.status === 'failed')
         if (done && s) {
           if (pollRef.current) clearInterval(pollRef.current)
-          if (!docsReady) await generateDocuments(s)
         }
       }, 2000)
     })()
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [projectId, start, fetchStatus, docsReady, generateDocuments])
+  }, [projectId, start, fetchStatus])
 
   const getSignedUrl = useCallback(async (path: string, expiresIn = 3600) => {
     const { data, error } = await supabase.storage.from('generated-assets').createSignedUrl(path, expiresIn)

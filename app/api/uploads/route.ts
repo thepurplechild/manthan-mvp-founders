@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { randomUUID } from 'crypto'
 import { rateLimit } from '@/lib/rate-limit'
+import { enqueueIngestionJob } from '@/lib/jobs/queue'
 
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
 const ACCEPTED = new Set(['application/pdf','text/plain','application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
@@ -81,12 +82,23 @@ export async function POST(req: NextRequest) {
   const stepRows = steps.map((name) => ({ ingestion_id: ingestion.id, name, status: 'queued' as const }))
   await supabase.from('ingestion_steps').insert(stepRows)
 
-  // Fire-and-forget run trigger (best effort)
-  try {
-    const base = process.env.NEXT_PUBLIC_API_BASE || ''
-    const url = base ? `${base}/api/ingestions/run` : `${new URL(req.url).origin}/api/ingestions/run`
-    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ingestion_id: ingestion.id }) }).catch(() => {})
-  } catch {}
+  await enqueueIngestionJob({
+    ingestionId: ingestion.id,
+    projectId,
+    userId: user.id,
+  })
+
+  console.log(
+    JSON.stringify({
+      scope: 'upload',
+      event: 'ingestion_enqueued',
+      ts: new Date().toISOString(),
+      ingestion_id: ingestion.id,
+      project_id: projectId,
+      user_id: user.id,
+      path,
+    })
+  )
 
   return NextResponse.json({ ingestion_id: ingestion.id, path })
 }

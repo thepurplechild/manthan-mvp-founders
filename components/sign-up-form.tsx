@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowLeft, User, Mail, Lock, Shield, FileText } from "lucide-react";
+import { recordRightsAcceptanceFromHeaders } from "@/lib/server/rights";
 
 export function SignUpForm({
   className,
@@ -66,9 +67,19 @@ export function SignUpForm({
           }
         },
       });
-      
+
       if (error) throw error;
-      
+
+      // Record rights acceptance if user was created successfully
+      if (data?.user) {
+        try {
+          await recordRightsAcceptanceFromHeaders(data.user.id, '1.0 - MVP Launch');
+        } catch (rightsError) {
+          console.error('Failed to record rights acceptance:', rightsError);
+          // Don't fail the entire signup for this, but log it
+        }
+      }
+
       if (data?.user && !data.user.email_confirmed_at) {
         // User created but needs email confirmation
         setSignUpSuccess(true);
