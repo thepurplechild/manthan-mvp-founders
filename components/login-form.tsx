@@ -23,33 +23,87 @@ export function LoginForm({
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const supabase = createClient();
-    
+
     setIsLoading(true);
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      
-      if (error) throw error;
-      
-      router.push("/dashboard");
+      // Use enhanced sign-in with verification status checks
+      const { signInWithVerification } = await import('@/lib/auth/verification');
+      const result = await signInWithVerification(email, password);
+
+      if (result.success && result.user) {
+        console.log('Sign in successful:', {
+          userId: result.user.id,
+          verificationState: result.verificationStatus.state,
+          redirectTo: result.redirectTo
+        });
+
+        // Redirect based on verification status
+        router.push(result.redirectTo);
+      } else {
+        // Handle specific verification-related errors
+        const status = result.verificationStatus;
+
+        switch (status.state) {
+          case 'pending_verification':
+            setError(
+              <>
+                <div className="font-semibold mb-2">Email Verification Required</div>
+                <div className="text-sm">
+                  Please check your email and click the confirmation link before signing in.
+                  <br />
+                  Check your spam folder if you don't see the email.
+                </div>
+              </>
+            );
+            break;
+
+          case 'verification_failed':
+            setError(
+              <>
+                <div className="font-semibold mb-2">Sign In Failed</div>
+                <div className="text-sm">
+                  {result.error || 'Unable to verify your account. Please try again.'}
+                </div>
+              </>
+            );
+            break;
+
+          default:
+            if (result.error?.includes("Invalid login credentials")) {
+              setError(
+                <>
+                  <div className="font-semibold mb-2">Invalid Credentials</div>
+                  <div className="text-sm">
+                    Invalid email or password. If you just signed up, make sure you've confirmed your email first.
+                  </div>
+                </>
+              );
+            } else {
+              setError(
+                <>
+                  <div className="font-semibold mb-2">Sign In Error</div>
+                  <div className="text-sm">
+                    {result.error || 'An unexpected error occurred. Please try again.'}
+                  </div>
+                </>
+              );
+            }
+        }
+      }
     } catch (error: unknown) {
       console.error("Sign in error:", error);
-      const errorMessage = error instanceof Error ? error.message : "An error occurred";
-      
-      // Provide better guidance for common issues
-      if (errorMessage.includes("Email not confirmed") || errorMessage.includes("email_not_confirmed")) {
-        setError("Please check your email and click the confirmation link before signing in. Check your spam folder if you don't see the email.");
-      } else if (errorMessage.includes("Invalid login credentials")) {
-        setError("Invalid email or password. If you just signed up, make sure you've confirmed your email first.");
-      } else {
-        setError(errorMessage);
-      }
+      const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+
+      setError(
+        <>
+          <div className="font-semibold mb-2">Connection Error</div>
+          <div className="text-sm">
+            {errorMessage}. Please check your internet connection and try again.
+          </div>
+        </>
+      );
     } finally {
       setIsLoading(false);
     }
@@ -61,18 +115,23 @@ export function LoginForm({
       setResendMsg('Enter your email above first.');
       return;
     }
+
     setResending(true);
-    const supabase = createClient();
+
     try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=/dashboard` },
-      } as unknown as { type: 'signup'; email: string; options: { emailRedirectTo: string } });
-      if (error) throw error;
-      setResendMsg('Verification email sent. Check your inbox and spam folder.');
+      // Use enhanced resend verification function
+      const { resendVerificationEmail } = await import('@/lib/auth/verification');
+      const result = await resendVerificationEmail(email);
+
+      if (result.success) {
+        setResendMsg(result.message);
+        // Clear any existing error since we've successfully sent a new email
+        setError(null);
+      } else {
+        setResendMsg(result.error || result.message);
+      }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Resend failed'
+      const msg = err instanceof Error ? err.message : 'Resend failed';
       setResendMsg(msg);
     } finally {
       setResending(false);
