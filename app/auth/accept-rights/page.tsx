@@ -3,7 +3,6 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { recordRightsAcceptanceFromHeaders } from "@/lib/server/rights";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -44,7 +43,23 @@ function AcceptRightsContent() {
     setError(null);
 
     try {
-      await recordRightsAcceptanceFromHeaders(user.id, '1.0 - MVP Launch');
+      const response = await fetch('/api/rights/accept', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ version: '1.0 - MVP Launch' }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const message =
+          typeof payload?.error === 'string' && payload.error.trim().length > 0
+            ? payload.error
+            : 'Unable to record your acceptance. Please try again.';
+        throw new Error(message);
+      }
 
       // Redirect to the intended destination
       router.push(redirectUrl as any);

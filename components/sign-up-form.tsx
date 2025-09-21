@@ -18,7 +18,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowLeft, User, Mail, Lock, Shield, FileText } from "lucide-react";
-import { recordRightsAcceptanceFromHeaders } from "@/lib/server/rights";
 
 export function SignUpForm({
   className,
@@ -73,7 +72,23 @@ export function SignUpForm({
       // Record rights acceptance if user was created successfully
       if (data?.user) {
         try {
-          await recordRightsAcceptanceFromHeaders(data.user.id, '1.0 - MVP Launch');
+          const response = await fetch('/api/rights/accept', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({ version: '1.0 - MVP Launch' }),
+          });
+
+          if (!response.ok && response.status !== 401) {
+            const payload = await response.json().catch(() => ({}));
+            const message =
+              typeof payload?.error === 'string' && payload.error.trim().length > 0
+                ? payload.error
+                : 'Failed to record rights acceptance';
+            throw new Error(message);
+          }
         } catch (rightsError) {
           console.error('Failed to record rights acceptance:', rightsError);
           // Don't fail the entire signup for this, but log it

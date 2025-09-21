@@ -24,17 +24,111 @@ jest.mock('@/lib/supabase/client', () => ({
   createClient: () => mockSupabaseClient,
 }));
 
-// Mock server action
-jest.mock('@/lib/server/rights', () => ({
-  recordRightsAcceptanceFromHeaders: jest.fn(),
-}));
-
 // Mock Lucide icons
 jest.mock('lucide-react', () => ({
   Shield: () => <div data-testid="shield-icon">🛡️</div>,
   FileText: () => <div data-testid="file-text-icon">📄</div>,
   ArrowRight: () => <div data-testid="arrow-right-icon">→</div>,
   AlertCircle: () => <div data-testid="alert-circle-icon">⚠️</div>,
+}));
+
+jest.mock('@/components/ui/dialog', () => {
+  const React = require('react');
+
+  const DialogContext = React.createContext({
+    open: false,
+    setOpen: (_open: boolean) => {},
+  });
+
+  const Dialog = ({ children }: { children: React.ReactNode }) => {
+    const [open, setOpen] = React.useState(false);
+    return (
+      <DialogContext.Provider value={{ open, setOpen }}>
+        {typeof children === 'function' ? (children as Function)({ open, setOpen }) : children}
+      </DialogContext.Provider>
+    );
+  };
+
+  const DialogTrigger = ({ children, onClick, asChild, ...props }: { children: React.ReactNode; onClick?: React.MouseEventHandler; asChild?: boolean }) => {
+    const { setOpen } = React.useContext(DialogContext);
+
+    const handleClick = (event: React.MouseEvent) => {
+      setOpen(true);
+      if (typeof onClick === 'function') {
+        onClick(event);
+      }
+      if (React.isValidElement(children) && typeof children.props?.onClick === 'function') {
+        children.props.onClick(event);
+      }
+    };
+
+    if (asChild && React.isValidElement(children)) {
+      return React.cloneElement(children, {
+        ...props,
+        onClick: handleClick,
+      });
+    }
+
+    return (
+      <button
+        type="button"
+        {...props}
+        onClick={handleClick}
+      >
+        {children}
+      </button>
+    );
+  };
+
+  const DialogContent = ({ children }: { children: React.ReactNode }) => {
+    const { open } = React.useContext(DialogContext);
+    if (!open) return null;
+    return <div data-testid="mock-dialog-content">{children}</div>;
+  };
+
+  const passthrough =
+    <T extends keyof JSX.IntrinsicElements>(tag: T) =>
+    ({ children, ...rest }: React.ComponentProps<T>) => React.createElement(tag, rest, children);
+
+  return {
+    __esModule: true,
+    Dialog,
+    DialogTrigger,
+    DialogContent,
+    DialogPortal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DialogOverlay: passthrough('div'),
+    DialogHeader: passthrough('div'),
+    DialogFooter: passthrough('div'),
+    DialogClose: ({ children, onClick, ...props }: React.ComponentProps<'button'>) => {
+      const { setOpen } = React.useContext(DialogContext);
+      return (
+        <button
+          type="button"
+          {...props}
+          onClick={(event) => {
+            setOpen(false);
+            onClick?.(event);
+          }}
+        >
+          {children}
+        </button>
+      );
+    },
+    DialogTitle: passthrough('h2'),
+    DialogDescription: passthrough('p'),
+  };
+});
+
+jest.mock('@/components/ui/checkbox', () => ({
+  Checkbox: ({ id, checked, onCheckedChange, ...props }: { id?: string; checked?: boolean; onCheckedChange?: (value: boolean) => void } & React.ComponentProps<'input'>) => (
+    <input
+      type="checkbox"
+      id={id}
+      checked={Boolean(checked)}
+      onChange={(event) => onCheckedChange?.(event.target.checked)}
+      {...props}
+    />
+  ),
 }));
 
 const mockPush = jest.fn();
@@ -48,11 +142,20 @@ const mockSearchParams = {
   get: jest.fn(),
 };
 
+const mockFetch = jest.fn();
+
 describe('AcceptRightsPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (useRouter as jest.Mock).mockReturnValue(mockRouter);
     (useSearchParams as jest.Mock).mockReturnValue(mockSearchParams);
+
+    (global as unknown as { fetch: typeof fetch }).fetch = mockFetch as unknown as typeof fetch;
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({ ok: true }),
+    });
 
     // Default search params
     mockSearchParams.get.mockImplementation((param: string) => {
@@ -179,14 +282,8 @@ describe('AcceptRightsPage', () => {
   });
 
   describe('Form Submission', () => {
-    beforeEach(() => {
-      const { recordRightsAcceptanceFromHeaders } = require('@/lib/server/rights');
-      recordRightsAcceptanceFromHeaders.mockResolvedValue(undefined);
-    });
-
     it('records rights acceptance when form is submitted', async () => {
       const user = userEvent.setup();
-      const { recordRightsAcceptanceFromHeaders } = require('@/lib/server/rights');
 
       render(<AcceptRightsPage />);
 
@@ -197,13 +294,20 @@ describe('AcceptRightsPage', () => {
       await user.click(acceptButton);
 
       await waitFor(() => {
-        expect(recordRightsAcceptanceFromHeaders).toHaveBeenCalledWith('user-123', '1.0 - MVP Launch');
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/rights/accept',
+          expect.objectContaining({
+            method: 'POST',
+            credentials: 'include',
+          })
+        );
+        const [, options] = mockFetch.mock.calls[0];
+        expect(options?.body).toContain('1.0 - MVP Launch');
       });
     });
 
     it('redirects to intended destination after successful acceptance', async () => {
       const user = userEvent.setup();
-      const { recordRightsAcceptanceFromHeaders } = require('@/lib/server/rights');
 
       render(<AcceptRightsPage />);
 
@@ -240,10 +344,8 @@ describe('AcceptRightsPage', () => {
 
     it('shows loading state during submission', async () => {
       const user = userEvent.setup();
-      const { recordRightsAcceptanceFromHeaders } = require('@/lib/server/rights');
-
-      // Make the server action hang
-      recordRightsAcceptanceFromHeaders.mockImplementation(() => new Promise(() => {}));
+      // Make the request hang
+      mockFetch.mockImplementation(() => new Promise(() => {}));
 
       render(<AcceptRightsPage />);
 
@@ -259,9 +361,11 @@ describe('AcceptRightsPage', () => {
 
     it('shows error message when submission fails', async () => {
       const user = userEvent.setup();
-      const { recordRightsAcceptanceFromHeaders } = require('@/lib/server/rights');
-
-      recordRightsAcceptanceFromHeaders.mockRejectedValue(new Error('Network error'));
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: jest.fn().mockResolvedValue({ error: 'Network error' }),
+      });
 
       render(<AcceptRightsPage />);
 
