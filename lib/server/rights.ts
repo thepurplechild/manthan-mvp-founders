@@ -32,7 +32,8 @@ export async function recordRightsAcceptance({
 }
 
 export async function recordRightsAcceptanceFromHeaders(userId: string, version: string): Promise<void> {
-  const forwardedFor = headers().get('x-forwarded-for');
+  const headerStore = await headers();
+  const forwardedFor = headerStore.get('x-forwarded-for');
   const ipAddress = forwardedFor ? forwardedFor.split(',')[0]?.trim() : undefined;
   await recordRightsAcceptance({ userId, version, ipAddress: ipAddress || null });
 }

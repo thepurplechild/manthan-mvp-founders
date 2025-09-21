@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { getServerClient } from '@/lib/supabase/server'
 import { rateLimit } from '@/lib/rate-limit'
 
 const Body = z.object({
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const body = Body.safeParse(await req.json())
   if (!body.success) return NextResponse.json({ code: 'bad_request', message: 'Invalid payload' }, { status: 400 })
 
-  const supabase = await createClient()
+  const supabase = getServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ code: 'unauthorized' }, { status: 401 })
 

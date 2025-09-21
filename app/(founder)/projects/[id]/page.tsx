@@ -37,7 +37,7 @@ async function getSignedDownloadUrlAction(formData: FormData): Promise<void> {
     throw new Error(error?.message ?? 'Unable to generate signed URL');
   }
 
-  redirect(data.signedUrl);
+  redirect(data.signedUrl as any);
 }
 
 async function createDealEntryAction(
@@ -85,13 +85,14 @@ interface DownloadItem {
   createdAt?: string | null;
 }
 
-export default async function ProjectReviewPage({ params }: { params: { id: string } }): Promise<JSX.Element> {
+export default async function ProjectReviewPage({ params }: { params: Promise<{ id: string }> }): Promise<JSX.Element> {
+  const { id } = await params;
   const supabase = await getRlsServerClient();
 
   const { data: project, error: projectError } = await supabase
     .from('projects')
     .select('id, title, logline, synopsis, owner_id, metadata')
-    .eq('id', params.id)
+    .eq('id', id)
     .maybeSingle();
 
   if (projectError || !project) {
@@ -110,19 +111,19 @@ export default async function ProjectReviewPage({ params }: { params: { id: stri
   const { data: uploads } = await supabase
     .from('script_uploads')
     .select('id, storage_path, created_at')
-    .eq('project_id', params.id)
+    .eq('project_id', id)
     .order('created_at', { ascending: false });
 
   const { data: assets } = await supabase
     .from('generated_assets')
     .select('id, storage_path, asset_type, created_at')
-    .eq('project_id', params.id)
+    .eq('project_id', id)
     .order('created_at', { ascending: false });
 
   const { data: pipelineEntries } = await supabase
     .from('deal_pipeline')
     .select('id, target_buyer_name, status, feedback_notes, created_at')
-    .eq('project_id', params.id)
+    .eq('project_id', id)
     .order('created_at', { ascending: false });
 
   const sourceFiles: DownloadItem[] = (uploads || []).map((upload) => ({
@@ -186,7 +187,7 @@ export default async function ProjectReviewPage({ params }: { params: { id: stri
       </div>
 
       <DealPipelineSection
-        projectId={params.id}
+        projectId={id}
         entries={dealEntries}
         createEntryAction={createDealEntryAction}
       />

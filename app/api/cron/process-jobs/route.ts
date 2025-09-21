@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
               ingestionId: job.ingestionId,
               projectId: job.projectId,
               userId: job.userId,
-              attempts: job.attempts + 1,
+              attempts: (job.attempts || 0) + 1,
             });
           } else {
             await markIngestionFailed(job.ingestionId, text || 'Processor rejected job');
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
           ingestionId: job.ingestionId,
           projectId: job.projectId,
           userId: job.userId,
-          attempts: job.attempts + 1,
+          attempts: (job.attempts || 0) + 1,
         });
       }
     }

@@ -47,7 +47,7 @@ export default function AcceptRightsPage() {
       await recordRightsAcceptanceFromHeaders(user.id, '1.0 - MVP Launch');
 
       // Redirect to the intended destination
-      router.push(redirectUrl);
+      router.push(redirectUrl as any);
     } catch (error: unknown) {
       console.error("Error recording rights acceptance:", error);
       const msg = error instanceof Error ? error.message : "An error occurred";

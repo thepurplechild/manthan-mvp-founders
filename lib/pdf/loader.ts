@@ -63,20 +63,25 @@ async function importPdfJs(): Promise<PdfJsLike> {
 }
 
 async function resolveWorkerUrl(): Promise<string> {
-  // Try min .js → .js → min .mjs → .mjs
-  try {
-    return (await import("pdfjs-dist/build/pdf.worker.min.js")).default as string;
-  } catch (_) {
+  // Fallback worker URLs for different environments
+  const workerUrls = [
+    "pdfjs-dist/build/pdf.worker.min.js",
+    "pdfjs-dist/build/pdf.worker.js",
+    "pdfjs-dist/build/pdf.worker.min.mjs",
+    "pdfjs-dist/build/pdf.worker.mjs"
+  ];
+
+  for (const url of workerUrls) {
     try {
-      return (await import("pdfjs-dist/build/pdf.worker.js")).default as string;
+      const module = await import(url);
+      return module.default as string;
     } catch (_) {
-      try {
-        return (await import("pdfjs-dist/build/pdf.worker.min.mjs")).default as string;
-      } catch (_) {
-        return (await import("pdfjs-dist/build/pdf.worker.mjs")).default as string;
-      }
+      continue;
     }
   }
+
+  // Ultimate fallback - use CDN
+  return "https://unpkg.com/pdfjs-dist@5.4.149/build/pdf.worker.min.js";
 }
 
 /**

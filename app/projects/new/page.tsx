@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getRlsServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { ArrowLeft } from "lucide-react";
 import IndiaProjectFields from "@/components/projects/IndiaProjectFields";
 
 export default async function NewProjectPage() {
-  const supabase = await createClient();
+  const supabase = await getRlsServerClient();
   
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   
@@ -37,7 +37,7 @@ export default async function NewProjectPage() {
     const languages = formData.getAll("languages") as string[];
     const audience = formData.getAll("target_audience") as string[];
     
-    const supabase = await createClient();
+    const supabase = await getRlsServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     
     if (!user) {

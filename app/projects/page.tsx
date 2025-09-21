@@ -1,9 +1,9 @@
-import { createClient } from "@/lib/supabase/server";
+import { getRlsServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
 export default async function ProjectsIndexPage() {
-  const supabase = await createClient();
+  const supabase = await getRlsServerClient();
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {

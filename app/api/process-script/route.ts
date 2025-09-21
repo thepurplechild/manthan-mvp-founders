@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import pRetry from 'p-retry'
 import { rateLimit } from '@/lib/rate-limit'
-import { createClient } from '@/lib/supabase/server'
+import { getServerClient } from '@/lib/supabase/server'
 import { ingestFile } from '@/lib/ingestion/core'
 import { stepExtractElements, stepGenerateCharacters, stepMarketAdaptation, stepPitchContent, stepVisualConcepts } from '@/lib/ai/steps'
 import type { CoreElements, CharactersResult, MarketAdaptation, PitchContent, VisualConcepts } from '@/types/pipeline'
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   const body = Body.safeParse(await req.json())
   if (!body.success) return NextResponse.json({ code: 'bad_request', message: 'Invalid payload', hint: body.error.issues.map(i=>i.message).join('; ') }, { status: 400 })
 
-  const supabase = await createClient()
+  const supabase = getServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ code: 'unauthorized', message: 'Sign in required' }, { status: 401 })
 

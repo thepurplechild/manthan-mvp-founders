@@ -31,7 +31,15 @@ const nextConfig: NextConfig = {
       resolve: { fullySpecified: false },
     });
 
-    // 3) Don’t try to polyfill Node core modules in the browser bundle.
+    // 3) Handle PDF.js imports gracefully during build
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'pdfjs-dist/build/pdf.js': 'pdfjs-dist',
+      'pdfjs-dist/build/pdf.worker.js': 'pdfjs-dist/build/pdf.worker.min.js',
+      'pdfjs-dist/build/pdf.worker.min.js': 'pdfjs-dist/build/pdf.worker.min.js',
+    };
+
+    // 4) Don't try to polyfill Node core modules in the browser bundle.
     if (!isServer) {
       config.resolve.fallback = {
         ...(config.resolve.fallback || {}),

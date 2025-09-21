@@ -1,8 +1,8 @@
-import { createClient } from '@/lib/supabase/server'
+import { getServerClient } from '@/lib/supabase/server'
 // import Link from 'next/link'
 
 export default async function AdminIngestions() {
-  const supabase = await createClient()
+  const supabase = getServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
     return (

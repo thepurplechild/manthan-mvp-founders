@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+
+// Prevent static generation since this page needs dynamic environment variables
+export const dynamic = 'force-dynamic';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,11 +21,18 @@ export default function AuthTestPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  const supabase = createClient();
+  // Only create client after component mounts to avoid build-time issues
+  const [supabase, setSupabase] = useState<any>(null);
 
   useEffect(() => {
+    setSupabase(createClient());
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }: any) => {
       setUser(session?.user ?? null);
       setLoading(false);
     });
@@ -30,13 +40,13 @@ export default function AuthTestPage() {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [supabase]);
 
   const clearMessages = () => {
     setMessage('');
@@ -44,6 +54,7 @@ export default function AuthTestPage() {
   };
 
   const testSignUp = async () => {
+    if (!supabase) return;
     clearMessages();
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -70,6 +81,7 @@ export default function AuthTestPage() {
   };
 
   const testSignIn = async () => {
+    if (!supabase) return;
     clearMessages();
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -86,6 +98,7 @@ export default function AuthTestPage() {
   };
 
   const testPasswordReset = async () => {
+    if (!supabase) return;
     clearMessages();
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(testEmail, {
@@ -101,6 +114,7 @@ export default function AuthTestPage() {
   };
 
   const testSignOut = async () => {
+    if (!supabase) return;
     clearMessages();
     try {
       const { error } = await supabase.auth.signOut();
@@ -113,6 +127,7 @@ export default function AuthTestPage() {
   };
 
   const testAuthState = async () => {
+    if (!supabase) return;
     clearMessages();
     try {
       const { data: { session }, error } = await supabase.auth.getSession();

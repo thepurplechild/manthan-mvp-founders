@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getRlsServerClient } from "@/lib/supabase/server";
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { type NextRequest, NextResponse } from "next/server";
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code"); // PKCE/OTP exchange code (newer flow)
   const next = searchParams.get("next") ?? "/";
 
-  const supabase = await createClient();
+  const supabase = await getRlsServerClient();
 
   // Handle the `code` param (exchange code for a session)
   if (code) {

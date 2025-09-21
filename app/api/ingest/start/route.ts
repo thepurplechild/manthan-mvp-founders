@@ -217,7 +217,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartInge
     await enqueueJob(jobMetadata);
 
     // CRITICAL FIX: Create corresponding Supabase ingestion record
-    const supabase = await import('@/lib/supabase/server').then(m => m.createClient());
+    const supabase = await import('@/lib/supabase/server').then(m => m.getServerClient());
     const { data: ingestion, error: dbError } = await supabase
       .from('ingestions')
       .insert({

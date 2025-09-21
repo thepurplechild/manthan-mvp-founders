@@ -1,5 +1,8 @@
 import { cookies } from 'next/headers';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient as supabaseCreateClient, type SupabaseClient } from '@supabase/supabase-js';
+
+// Re-export createClient for compatibility
+export { createClient } from '@supabase/supabase-js';
 
 let adminClient: SupabaseClient | null = null;
 
@@ -13,7 +16,7 @@ export function getServerClient(): SupabaseClient {
     throw new Error('Missing Supabase admin environment variables.');
   }
 
-  adminClient = createClient(url, serviceRole, {
+  adminClient = supabaseCreateClient(url, serviceRole, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -32,7 +35,7 @@ export async function getRlsServerClient(): Promise<SupabaseClient> {
     throw new Error('Missing Supabase RLS environment variables.');
   }
 
-  return createClient(url, anonKey, {
+  return supabaseCreateClient(url, anonKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: true,

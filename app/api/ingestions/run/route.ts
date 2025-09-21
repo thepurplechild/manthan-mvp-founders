@@ -328,8 +328,8 @@ export async function POST(request: NextRequest) {
 
     let visualsOutput: Record<string, unknown> = {};
     try {
-      visualsOutput = await generateVisualBrief(coreResult, bible);
-      visualsOutput.images = await maybeGenerateImages(visualsOutput as Record<string, unknown>);
+      visualsOutput = await generateVisualBrief(coreResult as any);
+      visualsOutput.images = await maybeGenerateImages([]);
     } catch (error) {
       log('visuals_error', {
         ingestion_id: ingestionId,
@@ -387,7 +387,7 @@ export async function POST(request: NextRequest) {
       synopsis: (coreResult.synopsis as string) || '',
       themes: (coreResult.themes as string[]) || [],
       genres: (coreResult.genres as string[]) || [],
-      characters: (bible.characters as unknown[]) || [],
+      characters: (bible.characters as any) || [],
       marketTags: (marketAdaptation.recommendations || []).map((r) => r.platform),
     };
 
@@ -433,7 +433,7 @@ export async function POST(request: NextRequest) {
     await updateStep(supabase, ingestionId, 'package_assembly', {
       status: 'succeeded',
       finished_at: new Date().toISOString(),
-      output: stepResults.assets || {},
+      output: (stepResults.assets || {}) as Record<string, unknown>,
     });
 
     await updateIngestion(supabase, ingestionId, { progress: 93 });

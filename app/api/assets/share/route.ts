@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { getServerClient } from '@/lib/supabase/server'
 
 const Body = z.object({ projectId: z.string(), path: z.string(), expiresIn: z.number().optional() })
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient()
+  const supabase = getServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ code: 'unauthorized' }, { status: 401 })
   const body = Body.safeParse(await req.json())

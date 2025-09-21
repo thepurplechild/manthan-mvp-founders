@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { rateLimit } from '@/lib/rate-limit'
-import { createClient } from '@/lib/supabase/server'
+import { getServerClient } from '@/lib/supabase/server'
 import { stepMarketAdaptation } from '@/lib/ai/steps'
 import { CoreElements, CharactersResult, MarketAdaptation } from '@/types/pipeline'
 
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   const rl = rateLimit(`ai:market:${ip}`, 20, 60000)
   if (!rl.allowed) return NextResponse.json({ code: 'rate_limited', message: 'Too many requests', hint: `Retry in ${Math.ceil(rl.retryAfter/1000)}s` }, { status: 429 })
 
-  const supabase = await createClient()
+  const supabase = getServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ code: 'unauthorized', message: 'Sign in required' }, { status: 401 })
 

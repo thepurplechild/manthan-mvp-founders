@@ -1,10 +1,10 @@
-import { createClient } from "@/lib/supabase/server";
+import { getRlsServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from 'next/link'
 import { Plus, FileText, Clock, CheckCircle, BarChart3, Upload, Eye, Download, Sparkles, Newspaper, TrendingUp, Building2 } from 'lucide-react'
 
 export default async function Dashboard() {
-  const supabase = await createClient();
+  const supabase = await getRlsServerClient();
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 

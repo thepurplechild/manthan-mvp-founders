@@ -42,12 +42,12 @@
       "memory": 1536
     },
     "api/run-packaging-agent.py": {
-      "runtime": "python3.11",
+      "runtime": "vercel-python@3.11",
       "maxDuration": 180,
       "memory": 1024
     },
     "api/packaging-worker.py": {
-      "runtime": "python3.11",
+      "runtime": "vercel-python@3.11",
       "maxDuration": 300,
       "memory": 1536
     },

@@ -22,6 +22,10 @@ export interface PipelineState {
   status: string
   steps: PipelineStep[]
   error?: string | null
+  assets?: Array<{
+    storage_path?: string
+    kind?: string
+  }>
 }
 
 export function usePipelineProgress(projectId: string | undefined) {
