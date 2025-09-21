@@ -1,9 +1,6 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-
-// Prevent static generation since this page needs dynamic environment variables
-export const dynamic = 'force-dynamic';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
