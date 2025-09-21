@@ -75,8 +75,8 @@ export async function middleware(req: NextRequest) {
     .eq('user_id', session.user.id)
     .single();
 
-  if (rightsError && rightsError.code === 'PGRST116') {
-    // No rights acceptance found - redirect to acceptance page
+  if (rightsError || !rightsAcceptance) {
+    // No rights acceptance found or error occurred - redirect to acceptance page
     const acceptanceUrl = new URL(RIGHTS_ACCEPTANCE_PATH, req.url);
     acceptanceUrl.searchParams.set('redirect', redirectTarget);
     return NextResponse.redirect(acceptanceUrl);
