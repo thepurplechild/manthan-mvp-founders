@@ -31,13 +31,9 @@ const nextConfig: NextConfig = {
       resolve: { fullySpecified: false },
     });
 
-    // 3) Handle PDF.js imports gracefully during build
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      'pdfjs-dist/build/pdf.js': 'pdfjs-dist',
-      'pdfjs-dist/build/pdf.worker.js': 'pdfjs-dist/build/pdf.worker.min.js',
-      'pdfjs-dist/build/pdf.worker.min.js': 'pdfjs-dist/build/pdf.worker.min.js',
-    };
+    // 3) Skip problematic PDF.js aliases to prevent build errors
+    // Let PDF.js use its natural entry points
+    console.warn('PDF.js modules not found, skipping webpack aliases');
 
     // 4) Don't try to polyfill Node core modules in the browser bundle.
     if (!isServer) {

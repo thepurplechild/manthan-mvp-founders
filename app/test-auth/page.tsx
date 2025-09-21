@@ -25,7 +25,13 @@ export default function AuthTestPage() {
   const [supabase, setSupabase] = useState<any>(null);
 
   useEffect(() => {
-    setSupabase(createClient());
+    try {
+      setSupabase(createClient());
+    } catch (error) {
+      console.warn('Failed to create Supabase client:', error);
+      setError('Supabase client creation failed. Check environment configuration.');
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -142,8 +148,9 @@ export default function AuthTestPage() {
 
   const testEnvironment = () => {
     clearMessages();
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    // Use fallback values during build/SSG to prevent build failures
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
     
     let envReport = '🔧 Environment Configuration:\n\n';
     

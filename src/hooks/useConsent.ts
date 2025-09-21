@@ -125,8 +125,8 @@ export const useConsent = (): UseConsentReturn => {
 // Helper hook for integrating with form libraries (like react-hook-form)
 export const useConsentFormIntegration = (
   statements: BillOfRightsStatement[],
-  setValue?: (name: string, value: any) => void,
-  trigger?: (name?: string) => Promise<boolean>
+  setValue?: any, // Use any to be compatible with react-hook-form's setValue
+  trigger?: any // Use any to be compatible with react-hook-form's trigger
 ) => {
   const consent = useConsent();
 

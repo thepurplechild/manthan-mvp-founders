@@ -48,39 +48,22 @@ async function importPdfJs(): Promise<PdfJsLike> {
     // Continue to next attempt
   }
   
-  // 3) Build non-min .js (final attempt)
-  try {
-    const m = (await import("pdfjs-dist/build/pdf.js")) as unknown as { default?: PdfJsLike } & Partial<PdfJsLike>;
-    const lib = m.default ?? (m as PdfJsLike);
-    if (lib && typeof lib.getDocument === 'function' && lib.GlobalWorkerOptions !== undefined) {
-      return lib;
-    }
-  } catch (_) {
-    // Final fallback failed
-  }
+  // 3) Legacy support - skip this since it's causing build issues
+  // The main entry point and .mjs should be sufficient for modern usage
   
   throw new Error('Unable to load PDF.js from any known entry point');
 }
 
 async function resolveWorkerUrl(): Promise<string> {
-  // Fallback worker URLs for different environments
-  const workerUrls = [
-    "pdfjs-dist/build/pdf.worker.min.js",
-    "pdfjs-dist/build/pdf.worker.js",
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    "pdfjs-dist/build/pdf.worker.mjs"
-  ];
+  // In browser environments, try to resolve worker URLs dynamically
+  const isBrowser = typeof window !== "undefined";
 
-  for (const url of workerUrls) {
-    try {
-      const module = await import(url);
-      return module.default as string;
-    } catch (_) {
-      continue;
-    }
+  if (!isBrowser) {
+    // Server-side: return empty string
+    return "";
   }
 
-  // Ultimate fallback - use CDN
+  // For browser builds, use CDN to avoid module resolution issues
   return "https://unpkg.com/pdfjs-dist@5.4.149/build/pdf.worker.min.js";
 }
 
