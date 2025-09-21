@@ -14,8 +14,8 @@ const nextConfig: NextConfig = {
   
   // Note: Cross-origin issues should be handled via API route CORS headers (configured in vercel.json)
   
-  // Exclude Supabase modules from Edge Runtime to prevent Node.js API compatibility issues
-  serverExternalPackages: ['@supabase/supabase-js', '@supabase/realtime-js', '@supabase/postgrest-js', '@supabase/storage-js'],
+  // Exclude Supabase modules and canvas from Edge Runtime to prevent Node.js API compatibility issues
+  serverExternalPackages: ['@supabase/supabase-js', '@supabase/realtime-js', '@supabase/postgrest-js', '@supabase/storage-js', 'canvas'],
 
   webpack: (config, { isServer, nextRuntime }) => {
     // 1) Emit pdf.js worker files as asset URLs so dynamic import returns a string
@@ -42,7 +42,14 @@ const nextConfig: NextConfig = {
         fs: false,
         path: false,
         crypto: false,
+        canvas: false,
       };
+    }
+
+    // 5) Handle canvas and other native dependencies for Vercel builds
+    if (isServer) {
+      config.externals = config.externals || [];
+      config.externals.push('canvas');
     }
 
     return config;

@@ -9,6 +9,12 @@ const path = require('path');
 
 console.log('🔧 Preparing build environment...');
 
+// Check if we're in Vercel environment
+const isVercel = process.env.VERCEL === '1';
+if (isVercel) {
+  console.log('🚀 Detected Vercel deployment environment');
+}
+
 // Required environment variables with fallback values
 const requiredEnvVars = {
   'ANTHROPIC_API_KEY': 'sk-ant-build-placeholder',
@@ -38,6 +44,17 @@ if (envUpdated) {
   console.log('   Real values should be set in production deployment');
 } else {
   console.log('✅ All environment variables are configured');
+}
+
+// Check for canvas availability in Vercel environment
+if (isVercel) {
+  try {
+    require('canvas');
+    console.log('✅ Canvas module available');
+  } catch (error) {
+    console.log('⚠️  Canvas module not available in Vercel environment (expected)');
+    console.log('   PDF processing will fall back to alternative methods');
+  }
 }
 
 console.log('🚀 Build environment ready');
