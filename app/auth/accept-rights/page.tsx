@@ -13,69 +13,225 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Shield, FileText, ArrowRight, AlertCircle } from "lucide-react";
+import { Shield, FileText, ArrowRight, AlertCircle, RefreshCw, CheckCircle } from "lucide-react";
+
+/**
+ * 🔐 Enhanced Creator's Bill of Rights Acceptance Page
+ *
+ * Features comprehensive error handling, retry mechanisms,
+ * progress tracking, and user-friendly feedback.
+ */
+
+interface RightsAcceptanceResponse {
+  success: boolean;
+  message?: string;
+  error?: string;
+  retryable?: boolean;
+  acceptanceId?: string;
+}
+
+interface RetryState {
+  count: number;
+  maxRetries: number;
+  canRetry: boolean;
+  nextRetryDelay: number;
+}
+
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAYS = [1000, 2000, 4000]; // Progressive delay
 
 function AcceptRightsContent() {
   const [acceptedRights, setAcceptedRights] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [retryState, setRetryState] = useState<RetryState>({
+    count: 0,
+    maxRetries: MAX_RETRY_ATTEMPTS,
+    canRetry: true,
+    nextRetryDelay: RETRY_DELAYS[0]
+  });
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams?.get('redirect') || '/dashboard';
+  const isVerified = searchParams?.get('verified') === 'true';
 
   useEffect(() => {
     const getUser = async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
-    };
-    getUser();
-  }, []);
+      try {
+        const supabase = createClient();
+        const { data: { user }, error } = await supabase.auth.getUser();
 
-  const handleAcceptRights = async () => {
+        if (error) {
+          console.error('Failed to get user:', error);
+          setError('Failed to load user information. Please refresh the page.');
+          return;
+        }
+
+        setUser(user);
+
+        // If user is not authenticated, redirect to login
+        if (!user) {
+          router.push('/auth/login?error=authentication_required');
+          return;
+        }
+
+        console.log('✅ User loaded for rights acceptance:', user.id);
+      } catch (err) {
+        console.error('Error loading user:', err);
+        setError('Unable to load user information. Please try again.');
+      }
+    };
+
+    getUser();
+  }, [router]);
+
+  /**
+   * Reset error and success states
+   */
+  const resetStates = () => {
+    setError(null);
+    setSuccessMessage(null);
+  };
+
+  /**
+   * Calculate next retry delay with exponential backoff
+   */
+  const getNextRetryDelay = (attemptCount: number): number => {
+    return RETRY_DELAYS[Math.min(attemptCount, RETRY_DELAYS.length - 1)];
+  };
+
+  /**
+   * Handle rights acceptance with comprehensive error handling and retry logic
+   */
+  const handleAcceptRights = async (isRetry: boolean = false) => {
     if (!acceptedRights || !user) {
       setError("You must accept the Creator's Bill of Rights to continue");
       return;
     }
 
     setIsLoading(true);
-    setError(null);
+    resetStates();
+
+    const currentRetryCount = isRetry ? retryState.count + 1 : 0;
 
     try {
+      console.log(`🚀 Attempting rights acceptance (attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS + 1})`);
+
+      const requestBody = {
+        version: '1.0 - MVP Launch',
+        retryAttempt: currentRetryCount
+      };
+
       const response = await fetch('/api/rights/accept', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify({ version: '1.0 - MVP Launch' }),
+        body: JSON.stringify(requestBody),
       });
 
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        const message =
-          typeof payload?.error === 'string' && payload.error.trim().length > 0
-            ? payload.error
-            : 'Unable to record your acceptance. Please try again.';
-        throw new Error(message);
+      let payload: RightsAcceptanceResponse;
+      try {
+        payload = await response.json();
+      } catch (parseError) {
+        throw new Error('Server returned invalid response format');
       }
 
-      // Redirect to the intended destination
-      router.push(redirectUrl as any);
-    } catch (error: unknown) {
-      console.error("Error recording rights acceptance:", error);
-      const msg = error instanceof Error ? error.message : "An error occurred";
-      setError(msg);
+      if (response.ok && payload.success) {
+        console.log('✅ Rights acceptance successful:', payload.acceptanceId);
+        setSuccessMessage(payload.message || 'Rights acceptance recorded successfully!');
+
+        // Update retry state to prevent further attempts
+        setRetryState(prev => ({ ...prev, canRetry: false }));
+
+        // Small delay before redirect for user to see success message
+        setTimeout(() => {
+          router.push(redirectUrl as any);
+        }, 1500);
+
+        return;
+      }
+
+      // Handle API errors
+      const errorMessage = payload.error || 'Unknown error occurred';
+      console.error('❌ Rights acceptance failed:', errorMessage);
+
+      // Update retry state
+      const canRetryAgain = payload.retryable !== false && currentRetryCount < MAX_RETRY_ATTEMPTS;
+      const nextDelay = getNextRetryDelay(currentRetryCount);
+
+      setRetryState({
+        count: currentRetryCount,
+        maxRetries: MAX_RETRY_ATTEMPTS,
+        canRetry: canRetryAgain,
+        nextRetryDelay: nextDelay
+      });
+
+      if (canRetryAgain) {
+        setError(`${errorMessage} (Attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS + 1})`);
+      } else {
+        setError(
+          currentRetryCount >= MAX_RETRY_ATTEMPTS
+            ? `Maximum retry attempts reached. ${errorMessage} Please refresh the page and try again.`
+            : errorMessage
+        );
+      }
+
+    } catch (networkError: unknown) {
+      console.error("❌ Network/system error during rights acceptance:", networkError);
+
+      const errorMsg = networkError instanceof Error ? networkError.message : "Network error occurred";
+      const canRetryAgain = currentRetryCount < MAX_RETRY_ATTEMPTS;
+
+      setRetryState({
+        count: currentRetryCount,
+        maxRetries: MAX_RETRY_ATTEMPTS,
+        canRetry: canRetryAgain,
+        nextRetryDelay: getNextRetryDelay(currentRetryCount)
+      });
+
+      if (canRetryAgain) {
+        setError(`${errorMsg} (Attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS + 1})`);
+      } else {
+        setError(`${errorMsg} Please check your internet connection and refresh the page.`);
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
+  /**
+   * Handle retry with progressive delay
+   */
+  const handleRetry = async () => {
+    if (!retryState.canRetry || retryState.count >= retryState.maxRetries) {
+      return;
+    }
+
+    console.log(`⏳ Retrying in ${retryState.nextRetryDelay}ms...`);
+
+    // Show countdown in error message
+    setError(`Retrying in ${Math.ceil(retryState.nextRetryDelay / 1000)} seconds...`);
+
+    setTimeout(() => {
+      handleAcceptRights(true);
+    }, retryState.nextRetryDelay);
+  };
+
   const handleLogout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push('/');
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      router.push('/');
+    } catch (err) {
+      console.error('Logout error:', err);
+      // Force navigation even if logout fails
+      router.push('/');
+    }
   };
 
   return (
@@ -95,6 +251,12 @@ function AcceptRightsContent() {
               <p className="text-white/60 text-lg">
                 Before accessing Manthan, please read and accept our Creator's Bill of Rights
               </p>
+              {isVerified && (
+                <div className="mt-4 flex items-center justify-center gap-2 text-green-400 text-sm">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Email successfully verified!</span>
+                </div>
+              )}
             </div>
 
             {/* Important Notice */}
@@ -173,6 +335,7 @@ function AcceptRightsContent() {
                   checked={acceptedRights}
                   onCheckedChange={(checked) => setAcceptedRights(checked as boolean)}
                   className="mt-1 border-white/30 data-[state=checked]:bg-purple-500 data-[state=checked]:border-purple-500"
+                  disabled={isLoading}
                 />
                 <label htmlFor="rights-agreement" className="text-sm leading-relaxed text-white cursor-pointer">
                   I have read and agree to the Creator's Bill of Rights. I understand that my intellectual property will be protected and used only for generating my pitch materials.
@@ -180,10 +343,38 @@ function AcceptRightsContent() {
               </div>
             </div>
 
-            {/* Error Message */}
+            {/* Success Message */}
+            {successMessage && (
+              <div className="bg-green-500/10 backdrop-blur-xl border border-green-500/20 text-green-300 p-4 rounded-xl text-sm mb-6 flex items-center gap-3">
+                <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                <div>
+                  <p className="font-semibold">Success!</p>
+                  <p>{successMessage}</p>
+                  <p className="text-green-200 text-xs mt-1">Redirecting to your dashboard...</p>
+                </div>
+              </div>
+            )}
+
+            {/* Error Message with Retry Option */}
             {error && (
               <div className="bg-red-500/10 backdrop-blur-xl border border-red-500/20 text-red-300 p-4 rounded-xl text-sm mb-6">
-                {error}
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p>{error}</p>
+                    {retryState.canRetry && retryState.count < retryState.maxRetries && !isLoading && (
+                      <div className="mt-3">
+                        <button
+                          onClick={handleRetry}
+                          className="inline-flex items-center gap-2 text-red-200 hover:text-red-100 text-xs underline"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Retry ({retryState.count + 1}/{retryState.maxRetries + 1})
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -191,14 +382,19 @@ function AcceptRightsContent() {
             <div className="space-y-4">
               <button
                 type="button"
-                onClick={handleAcceptRights}
-                disabled={isLoading || !acceptedRights}
-                className="w-full h-12 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/25 backdrop-blur-sm border border-white/20 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-purple-500/40 disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center gap-2"
+                onClick={() => handleAcceptRights(false)}
+                disabled={isLoading || !acceptedRights || !!successMessage}
+                className="w-full h-12 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/25 backdrop-blur-sm border border-white/20 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-purple-500/40 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {isLoading ? (
                   <div className="flex items-center gap-2">
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    Recording acceptance...
+                    {retryState.count > 0 ? `Retrying (${retryState.count + 1}/${retryState.maxRetries + 1})...` : 'Recording acceptance...'}
+                  </div>
+                ) : successMessage ? (
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Completed Successfully</span>
                   </div>
                 ) : (
                   <>
@@ -211,7 +407,8 @@ function AcceptRightsContent() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="w-full h-12 bg-white/10 backdrop-blur-xl border border-white/20 text-white hover:bg-white/20 rounded-xl transition-all duration-300"
+                disabled={isLoading}
+                className="w-full h-12 bg-white/10 backdrop-blur-xl border border-white/20 text-white hover:bg-white/20 rounded-xl transition-all duration-300 disabled:opacity-50"
               >
                 Sign Out Instead
               </button>
@@ -222,6 +419,11 @@ function AcceptRightsContent() {
               <p className="text-white/40 text-sm">
                 This acceptance is required to ensure your creative work is properly protected on our platform.
               </p>
+              {retryState.count > 0 && (
+                <p className="text-white/30 text-xs mt-2">
+                  If you continue to experience issues, please contact support.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -234,7 +436,10 @@ export default function AcceptRightsPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-white">Loading...</div>
+        <div className="text-white flex items-center gap-3">
+          <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+          Loading Creator Protection...
+        </div>
       </div>
     }>
       <AcceptRightsContent />
