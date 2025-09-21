@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 
-const LOGIN_PATH = '/login';
+const LOGIN_PATH = '/auth/login';
 const NON_FOUNDER_REDIRECT = '/dashboard';
 const RIGHTS_ACCEPTANCE_PATH = '/auth/accept-rights';
 
@@ -103,5 +103,11 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/founder/:path*', '/dashboard/:path*', '/projects/:path*'],
+  matcher: [
+    '/founder/:path*',
+    '/dashboard/:path*',
+    '/projects/:path*',
+    '/auth/accept-rights',
+    '/protected/:path*'
+  ],
 };

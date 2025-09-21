@@ -74,18 +74,38 @@
     }
   ],
 
-  "rewrites": [
-    {
-      "source": "/health",
-      "destination": "/api/health"
-    }
-  ],
 
   "redirects": [
     {
       "source": "/docs",
       "destination": "/dashboard",
       "permanent": false
+    },
+    {
+      "source": "/login",
+      "destination": "/auth/login",
+      "permanent": false
+    },
+    {
+      "source": "/signup",
+      "destination": "/auth/sign-up",
+      "permanent": false
+    },
+    {
+      "source": "/sign-up",
+      "destination": "/auth/sign-up",
+      "permanent": false
+    }
+  ],
+
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/((?!api|_next|_static|favicon.ico|manifest.json|robots.txt).*)",
+      "destination": "/index.html"
     }
   ],
 
