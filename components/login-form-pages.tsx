@@ -1,35 +1,57 @@
+/**
+ * Pages Router Compatible Login Form
+ * Uses client-side verification functions that call API routes
+ * No server/client boundary violations
+ */
+
 "use client";
 
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter } from "next/router";
 import { useState } from "react";
-import { ArrowLeft, Mail, Lock, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, Mail, Lock, Sparkles, Star, AlertCircle, RefreshCw } from "lucide-react";
+
+// Import ONLY client-side functions - no server dependencies
+import {
+  signInWithVerification,
+  resendVerificationEmail,
+  type SignInResult
+} from "@/lib/auth/client-verification";
+
+export interface LoginFormProps extends React.ComponentPropsWithoutRef<"div"> {
+  onSignInSuccess?: (result: SignInResult) => void;
+  redirectTo?: string;
+}
 
 export function LoginForm({
   className,
+  onSignInSuccess,
+  redirectTo,
   ...props
-}: React.ComponentPropsWithoutRef<"div">) {
+}: LoginFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | React.ReactNode | null>(null);
+  const [error, setError] = useState<React.ReactNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState<string | null>(null);
   const router = useRouter();
 
+  /**
+   * Handle login form submission with comprehensive error handling
+   */
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
     setIsLoading(true);
     setError(null);
+    setResendMsg(null);
 
     try {
-      // Use client-side sign-in with verification status checks
-      const { signInWithVerification } = await import('@/lib/auth/client-verification');
+      // Use client-side verification function that calls API routes
       const result = await signInWithVerification(email, password);
 
       if (result.success && result.user) {
@@ -39,8 +61,14 @@ export function LoginForm({
           redirectTo: result.redirectTo
         });
 
-        // Redirect based on verification status
-        router.push(result.redirectTo as any);
+        // Call success callback if provided
+        if (onSignInSuccess) {
+          onSignInSuccess(result);
+        }
+
+        // Redirect based on verification status or provided redirectTo
+        const finalRedirectTo = redirectTo || result.redirectTo;
+        router.push(finalRedirectTo);
       } else {
         // Handle specific verification-related errors
         const status = result.verificationStatus;
@@ -48,46 +76,77 @@ export function LoginForm({
         switch (status.state) {
           case 'pending_verification':
             setError(
-              <>
-                <div className="font-semibold mb-2">Email Verification Required</div>
-                <div className="text-sm">
-                  Please check your email and click the confirmation link before signing in.
-                  <br />
-                  Check your spam folder if you don't see the email.
+              <div>
+                <div className="flex items-center gap-2 font-semibold mb-2">
+                  <Mail className="w-4 h-4" />
+                  Email Verification Required
                 </div>
-              </>
+                <div className="text-sm space-y-2">
+                  <p>Please check your email and click the confirmation link before signing in.</p>
+                  <p className="text-manthan-charcoal-500">Check your spam folder if you don't see the email.</p>
+                </div>
+              </div>
             );
             break;
 
           case 'verification_failed':
             setError(
-              <>
-                <div className="font-semibold mb-2">Sign In Failed</div>
+              <div>
+                <div className="flex items-center gap-2 font-semibold mb-2">
+                  <AlertCircle className="w-4 h-4" />
+                  Verification Failed
+                </div>
                 <div className="text-sm">
                   {result.error || 'Unable to verify your account. Please try again.'}
                 </div>
-              </>
+              </div>
             );
             break;
 
           default:
-            if (result.error?.includes("Invalid login credentials")) {
+            if (result.rateLimited) {
               setError(
-                <>
-                  <div className="font-semibold mb-2">Invalid Credentials</div>
-                  <div className="text-sm">
-                    Invalid email or password. If you just signed up, make sure you've confirmed your email first.
+                <div>
+                  <div className="flex items-center gap-2 font-semibold mb-2">
+                    <AlertCircle className="w-4 h-4" />
+                    Too Many Attempts
                   </div>
-                </>
+                  <div className="text-sm">
+                    <p>{result.error}</p>
+                    {result.remainingAttempts !== undefined && (
+                      <p className="mt-1 text-manthan-charcoal-500">
+                        Attempts remaining: {result.remainingAttempts}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            } else if (result.error?.includes("Invalid login credentials")) {
+              setError(
+                <div>
+                  <div className="flex items-center gap-2 font-semibold mb-2">
+                    <Lock className="w-4 h-4" />
+                    Invalid Credentials
+                  </div>
+                  <div className="text-sm space-y-1">
+                    <p>Invalid email or password.</p>
+                    <p className="text-manthan-charcoal-500">
+                      If you just signed up, make sure you've confirmed your email first.
+                    </p>
+                  </div>
+                </div>
               );
             } else {
               setError(
-                <>
-                  <div className="font-semibold mb-2">Sign In Error</div>
+                <div>
+                  <div className="flex items-center gap-2 font-semibold mb-2">
+                    <AlertCircle className="w-4 h-4" />
+                    Sign In Error
+                  </div>
                   <div className="text-sm">
                     {result.error || 'An unexpected error occurred. Please try again.'}
                   </div>
-                </>
+                </div>
               );
             }
         }
@@ -97,18 +156,24 @@ export function LoginForm({
       const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
 
       setError(
-        <>
-          <div className="font-semibold mb-2">Connection Error</div>
+        <div>
+          <div className="flex items-center gap-2 font-semibold mb-2">
+            <AlertCircle className="w-4 h-4" />
+            Connection Error
+          </div>
           <div className="text-sm">
             {errorMessage}. Please check your internet connection and try again.
           </div>
-        </>
+        </div>
       );
     } finally {
       setIsLoading(false);
     }
   };
 
+  /**
+   * Handle resend verification email with rate limiting
+   */
   const handleResend = async () => {
     setResendMsg(null);
     if (!email) {
@@ -119,8 +184,7 @@ export function LoginForm({
     setResending(true);
 
     try {
-      // Use client-side resend verification function
-      const { resendVerificationEmail } = await import('@/lib/auth/client-verification');
+      // Use client-side function that calls API route
       const result = await resendVerificationEmail(email);
 
       if (result.success) {
@@ -128,7 +192,11 @@ export function LoginForm({
         // Clear any existing error since we've successfully sent a new email
         setError(null);
       } else {
-        setResendMsg(result.error || result.message);
+        if (result.rateLimited) {
+          setResendMsg(`Rate limited: ${result.message}`);
+        } else {
+          setResendMsg(result.error || result.message);
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Resend failed';
@@ -147,7 +215,7 @@ export function LoginForm({
         <div className="absolute bottom-20 left-1/2 w-72 h-72 bg-manthan-coral-400 rounded-full mix-blend-multiply filter blur-3xl animate-pulse delay-500"></div>
         <div className="absolute top-1/2 right-1/4 w-64 h-64 bg-manthan-mint-400 rounded-full mix-blend-multiply filter blur-3xl animate-pulse delay-300"></div>
       </div>
-      
+
       {/* Decorative elements */}
       <div className="absolute top-10 left-10 text-manthan-saffron-300/30">
         <Sparkles className="w-8 h-8 animate-pulse" />
@@ -158,18 +226,18 @@ export function LoginForm({
       <div className="absolute bottom-20 left-20 text-manthan-coral-300/30">
         <Sparkles className="w-10 h-10 animate-pulse delay-400" />
       </div>
-      
+
       <div className={cn("relative z-10 flex min-h-screen w-full items-center justify-center p-6 md:p-10", className)} {...props}>
         <div className="w-full max-w-md animate-fadeIn">
           {/* Back button */}
-          <Link 
-            href="/" 
+          <Link
+            href="/"
             className="inline-flex items-center gap-2 text-manthan-charcoal-600 hover:text-manthan-saffron-600 transition-colors mb-6 group"
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
             <span className="font-medium">Back to home</span>
           </Link>
-          
+
           {/* Login Card */}
           <div className="card-indian p-8 md:p-10 animate-slideUp">
             {/* Header with Indian aesthetics */}
@@ -178,7 +246,7 @@ export function LoginForm({
               <div className="w-16 h-16 gradient-saffron rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-indian">
                 <span className="text-white font-bold text-2xl font-heading">म</span>
               </div>
-              
+
               <h1 className="text-3xl font-heading font-bold text-manthan-charcoal-800 mb-3">
                 Welcome Back to{" "}
                 <span className="text-gradient-indian">Manthan</span>
@@ -211,6 +279,7 @@ export function LoginForm({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="input-indian h-12 text-base"
+                  disabled={isLoading}
                 />
               </div>
 
@@ -236,6 +305,7 @@ export function LoginForm({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="input-indian h-12 text-base"
+                  disabled={isLoading}
                 />
               </div>
 
@@ -252,19 +322,27 @@ export function LoginForm({
                 <button
                   type="button"
                   onClick={handleResend}
-                  disabled={resending}
-                  className="text-manthan-royal-600 hover:text-manthan-royal-700 font-medium disabled:opacity-50"
+                  disabled={resending || isLoading}
+                  className="text-manthan-royal-600 hover:text-manthan-royal-700 font-medium disabled:opacity-50 flex items-center gap-1"
                 >
+                  {resending && <RefreshCw className="w-3 h-3 animate-spin" />}
                   {resending ? 'Resending…' : 'Resend verification'}
                 </button>
               </div>
               {resendMsg && (
-                <p className="text-xs text-manthan-charcoal-600 mt-1">{resendMsg}</p>
+                <p className={cn(
+                  "text-xs mt-1",
+                  resendMsg.includes('sent') || resendMsg.includes('Check')
+                    ? "text-manthan-mint-600"
+                    : "text-manthan-coral-600"
+                )}>
+                  {resendMsg}
+                </p>
               )}
 
               {/* Login Button */}
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isLoading}
                 className="w-full btn-indian h-14 text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               >

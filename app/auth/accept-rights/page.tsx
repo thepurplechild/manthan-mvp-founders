@@ -22,7 +22,7 @@ function AcceptRightsContent() {
   const [user, setUser] = useState<any>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get('redirect') || '/dashboard';
+  const redirectUrl = searchParams?.get('redirect') || '/dashboard';
 
   useEffect(() => {
     const getUser = async () => {

@@ -1,6 +1,7 @@
 /**
- * Authentication Security Measures
+ * Authentication Security Measures - Pages Router Compatible
  * Implements rate limiting, token validation, and security best practices
+ * Safe for use in both client and server contexts
  */
 
 import { createHash } from 'crypto';
@@ -282,7 +283,7 @@ export function isTokenExpired(tokenCreatedAt: Date, expirationHours: number = 2
  * @param userAgent - User agent string
  */
 export function logSecurityEvent(
-  event: 'rate_limit_exceeded' | 'invalid_credentials' | 'suspicious_activity' | 'successful_login' | 'failed_verification',
+  event: 'rate_limit_exceeded' | 'invalid_credentials' | 'suspicious_activity' | 'successful_login' | 'failed_verification' | 'method_not_allowed' | 'signin_error' | 'resend_failed' | 'verification_resent' | 'resend_error' | 'api_error',
   details: Record<string, any>,
   ip?: string,
   userAgent?: string

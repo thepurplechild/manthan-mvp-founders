@@ -13,10 +13,10 @@ function SearchParamsHandler() {
   
   // Handle email verification redirects
   useEffect(() => {
-    const code = searchParams.get('code')
+    const code = searchParams?.get('code')
     if (code) {
       // Redirect to proper confirmation route
-      const next = searchParams.get('next') || '/dashboard'
+      const next = searchParams?.get('next') || '/dashboard'
       router.replace(`/auth/confirm?code=${code}&next=${encodeURIComponent(next)}`)
       return
     }

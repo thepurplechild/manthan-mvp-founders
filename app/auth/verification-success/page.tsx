@@ -23,9 +23,9 @@ export default function VerificationSuccessPage() {
   });
 
   useEffect(() => {
-    const verified = searchParams.get('verified') === 'true';
-    const needsRights = searchParams.get('needs_rights') === 'true';
-    const welcome = searchParams.get('welcome') === 'true';
+    const verified = searchParams?.get('verified') === 'true';
+    const needsRights = searchParams?.get('needs_rights') === 'true';
+    const welcome = searchParams?.get('welcome') === 'true';
 
     setVerificationState({
       isVerified: verified,

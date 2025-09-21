@@ -18,8 +18,8 @@ export default function AuthError({
   reset: () => void
 }) {
   const searchParams = useSearchParams()
-  const errorCode = searchParams.get('error')
-  const errorDescription = searchParams.get('error_description')
+  const errorCode = searchParams?.get('error')
+  const errorDescription = searchParams?.get('error_description')
 
   useEffect(() => {
     console.error('Auth error:', { error, errorCode, errorDescription })
