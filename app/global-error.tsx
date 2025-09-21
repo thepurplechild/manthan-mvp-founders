@@ -89,12 +89,12 @@ export default function GlobalError({
               <div className="pt-4 border-t border-manthan-saffron-200/50 text-sm text-manthan-charcoal-600">
                 <p>
                   If this problem persists, please{' '}
-                  <Link
-                    href="/contact"
+                  <a
+                    href="mailto:support@manthan.app"
                     className="text-manthan-saffron-600 hover:text-manthan-gold-600 font-medium"
                   >
                     contact support
-                  </Link>
+                  </a>
                   {error.digest && ` and include error ID: ${error.digest}`}
                 </p>
               </div>

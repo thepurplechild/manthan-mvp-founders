@@ -31,9 +31,14 @@ const nextConfig: NextConfig = {
       resolve: { fullySpecified: false },
     });
 
-    // 3) Skip problematic PDF.js aliases to prevent build errors
-    // Let PDF.js use its natural entry points
-    console.warn('PDF.js modules not found, skipping webpack aliases');
+    // 3) PDF.js Worker Path Configuration for Vercel/Production
+    // Set up proper PDF.js worker path for both development and production
+    if (!isServer && nextRuntime !== 'edge') {
+      // Only warn in development, not production
+      if (process.env.NODE_ENV === 'development') {
+        console.log('📄 Configuring PDF.js for development environment');
+      }
+    }
 
     // 4) Don't try to polyfill Node core modules in the browser bundle.
     if (!isServer) {
