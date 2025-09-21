@@ -1,64 +1,46 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build",
-  "installCommand": "npm install",
-  "devCommand": "npm run dev",
+  "framework": "nextjs",
+  "regions": ["iad1"],
 
   "functions": {
     "app/api/cron/process-jobs/route.ts": {
-      "maxDuration": 300,
-      "memory": 1536
+      "maxDuration": 60,
+      "memory": 1024
     },
     "app/api/ingest/route.ts": {
       "maxDuration": 60,
       "memory": 1024
     },
     "app/api/process-script/route.ts": {
-      "maxDuration": 300,
-      "memory": 1536
+      "maxDuration": 60,
+      "memory": 1024
     },
     "app/api/ingestions/run/route.ts": {
-      "maxDuration": 300,
-      "memory": 1536
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "app/api/ingestions/process-direct/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
     },
     "app/api/generate-documents/route.ts": {
-      "maxDuration": 120,
+      "maxDuration": 60,
       "memory": 1024
     },
     "app/api/ai/**/route.ts": {
       "maxDuration": 60,
       "memory": 1024
     },
-    "api/projects/request-upload-url/index.py": {
+    "app/api/admin/**/route.ts": {
       "maxDuration": 30,
       "memory": 512
     },
-    "api/projects/finalize-upload/index.py": {
-      "maxDuration": 60,
-      "memory": 512
-    },
-    "api/projects/run-packaging-agent/index.py": {
-      "maxDuration": 300,
-      "memory": 1536
-    },
-    "api/run-packaging-agent.py": {
-      "runtime": "vercel-python@3.11",
-      "maxDuration": 180,
-      "memory": 1024
-    },
-    "api/packaging-worker.py": {
-      "runtime": "vercel-python@3.11",
-      "maxDuration": 300,
-      "memory": 1536
-    },
-    "app/api/**/route.ts": {
+    "app/api/test-ingestion/route.ts": {
       "maxDuration": 30,
       "memory": 512
     }
   },
-
-  "regions": ["iad1"],
-  "framework": "nextjs",
 
   "headers": [
     {
@@ -117,10 +99,6 @@
     {
       "path": "/api/cron/process-jobs",
       "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/packaging-worker",
-      "schedule": "*/5 * * * *"
     }
   ]
 }
