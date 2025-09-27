@@ -88,6 +88,16 @@ async function updateIngestion(
 }
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  const userAgent = request.headers.get('user-agent') || 'unknown';
+  const origin = request.headers.get('origin') || new URL(request.url).origin;
+
+  log('processing_request_start', {
+    user_agent: userAgent,
+    origin,
+    has_cron_secret: Boolean(process.env.CRON_SECRET),
+  });
+
   if (!process.env.CRON_SECRET) {
     log('config_error', { has_secret: false });
     return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 });
@@ -99,11 +109,20 @@ export async function POST(request: NextRequest) {
     '';
 
   if (headerSecret !== process.env.CRON_SECRET) {
-    log('auth_failed', { provided: Boolean(headerSecret) });
+    log('auth_failed', {
+      provided: Boolean(headerSecret),
+      user_agent: userAgent,
+      origin,
+    });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { ingestionId?: string; ingestion_id?: string };
+  log('auth_success', {
+    user_agent: userAgent,
+    authenticated: true,
+  });
+
+  let body: { ingestionId?: string; ingestion_id?: string; trigger?: string };
   try {
     body = await request.json();
   } catch {
@@ -112,8 +131,14 @@ export async function POST(request: NextRequest) {
 
   const ingestionId = body.ingestionId || body.ingestion_id;
   if (!ingestionId) {
+    log('invalid_request', { reason: 'Missing ingestionId', body });
     return NextResponse.json({ error: 'Missing ingestionId' }, { status: 400 });
   }
+
+  log('ingestion_lookup_start', {
+    ingestion_id: ingestionId,
+    trigger: body.trigger || 'unknown',
+  });
 
   const supabase = getAdminClient();
 
@@ -124,9 +149,23 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
 
   if (fetchError || !ingestion) {
-    log('ingestion_missing', { ingestion_id: ingestionId, err: fetchError?.message });
+    log('ingestion_missing', {
+      ingestion_id: ingestionId,
+      err: fetchError?.message,
+      fetch_error_code: fetchError?.code,
+    });
     return NextResponse.json({ error: 'Ingestion not found' }, { status: 404 });
   }
+
+  log('ingestion_found', {
+    ingestion_id: ingestionId,
+    user_id: ingestion.user_id,
+    project_id: ingestion.project_id,
+    current_status: ingestion.status,
+    current_progress: ingestion.progress,
+    created_at: ingestion.created_at,
+    updated_at: ingestion.updated_at,
+  });
 
   log('start', {
     ingestion_id: ingestionId,
@@ -164,6 +203,12 @@ export async function POST(request: NextRequest) {
   const stepResults: Record<string, unknown> = {};
 
   const failIngestion = async (message: string) => {
+    log('ingestion_failed', {
+      ingestion_id: ingestionId,
+      error: message,
+      progress: ingestion.progress ?? 0,
+    });
+
     await updateIngestion(supabase, ingestionId, {
       status: 'failed',
       error: message,
@@ -456,10 +501,27 @@ export async function POST(request: NextRequest) {
 
     log('completed', { ingestion_id: ingestionId });
 
-    return NextResponse.json({ ok: true, ingestionId });
+    const totalDuration = Date.now() - startTime;
+
+    log('processing_complete', {
+      ingestion_id: ingestionId,
+      total_duration: totalDuration,
+      final_status: 'completed',
+      final_progress: 100,
+    });
+
+    return NextResponse.json({ ok: true, ingestionId, duration: totalDuration });
   } catch (error) {
+    const totalDuration = Date.now() - startTime;
     const message = error instanceof Error ? error.message : 'Unknown processor error';
-    log('fatal_error', { ingestion_id: ingestionId, err: message });
+
+    log('fatal_error', {
+      ingestion_id: ingestionId,
+      err: message,
+      stack: error instanceof Error ? error.stack : undefined,
+      total_duration: totalDuration,
+    });
+
     await failIngestion(message);
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -63,6 +63,7 @@ export function SignUpForm({
           emailRedirectTo: `${window.location.origin}/auth/confirm?next=/dashboard`,
           data: {
             full_name: fullName,
+            acceptedRights: true
           }
         },
       });

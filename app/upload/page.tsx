@@ -13,91 +13,153 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null)
   const [stuckRetryAttempted, setStuckRetryAttempted] = useState(false)
   const [queuedSince, setQueuedSince] = useState<number | null>(null)
+  const [pollInterval, setPollInterval] = useState(2000) // Start with 2s, increase with exponential backoff
+  const [retryCount, setRetryCount] = useState(0)
+  const [maxRetries] = useState(5)
+  const [lastStatusCheck, setLastStatusCheck] = useState<number>(Date.now())
 
   useEffect(() => {
     let timer: NodeJS.Timeout | undefined
     if (ingestionId) {
-      // Poll ingestion status every 4s (reduced from 2s to reduce server load)
-      timer = setInterval(async () => {
+      // Dynamic polling with exponential backoff
+      const pollStatus = async () => {
         try {
+          console.log(`[upload] Polling status (interval: ${pollInterval}ms, retry: ${retryCount}/${maxRetries})`)
           const r = await fetch(`/api/ingestions/status?id=${ingestionId}`)
+
           if (r.ok) {
-          const j = await r.json()
-          const currentStatus = j.status || 'processing'
-          setProgress(j.progress || 0)
-          setStatus(currentStatus)
-          
-          // Track when ingestion first becomes queued and reset when not queued
-          if (currentStatus === 'queued' && !queuedSince) {
-            setQueuedSince(Date.now())
-          } else if (currentStatus !== 'queued' && queuedSince) {
-            setQueuedSince(null) // Reset timer when no longer queued
-          }
+            const j = await r.json()
+            const currentStatus = j.status || 'processing'
+            const currentProgress = j.progress || 0
+
+            setProgress(currentProgress)
+            setStatus(currentStatus)
+            setLastStatusCheck(Date.now())
+
+            // Reset retry count on successful response
+            setRetryCount(0)
+
+            // Track when ingestion first becomes queued and reset when not queued
+            if (currentStatus === 'queued' && !queuedSince) {
+              setQueuedSince(Date.now())
+              console.log('[upload] Ingestion entered queued state')
+            } else if (currentStatus !== 'queued' && queuedSince) {
+              setQueuedSince(null) // Reset timer when no longer queued
+              console.log(`[upload] Ingestion left queued state, now: ${currentStatus}`)
+            }
+
+            // Adjust polling frequency based on status
+            if (currentStatus === 'processing' || currentStatus === 'running') {
+              setPollInterval(3000) // Poll more frequently during active processing
+            } else if (currentStatus === 'queued') {
+              setPollInterval(Math.min(pollInterval * 1.2, 10000)) // Gradual backoff for queued items
+            } else {
+              setPollInterval(2000) // Default frequency
+            }
           
           // Extract project_id for navigation when complete
           if (j.project_id && !projectId) {
             setProjectId(j.project_id)
           }
           
-          // Auto-retry mechanism: if stuck in "queued" for more than 30 seconds, try direct processing
-          if (currentStatus === 'queued' && queuedSince && !stuckRetryAttempted) {
-            const timeStuck = Date.now() - queuedSince
-            if (timeStuck > 30000) { // 30 seconds
-              console.log('[upload] Ingestion stuck in queued status for', timeStuck, 'ms, attempting direct processing...')
-              setStuckRetryAttempted(true)
-              setStatus('retrying')
-              
-              try {
-                const retryRes = await fetch('/api/ingestions/process-direct', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ ingestion_id: ingestionId })
-                })
-                
-                if (retryRes.ok) {
-                  console.log('[upload] Direct processing triggered successfully')
-                  setProgress(40) // Show some progress
-                } else {
-                  const retryError = await retryRes.json()
-                  console.error('[upload] Direct processing failed:', retryError)
-                  
-                  // Don't mark as failed for benign errors (400 = not queued anymore)
-                  if (retryRes.status === 400) {
-                    console.log('[upload] Ingestion no longer queued - likely processing normally')
-                    // Keep current status, ingestion may have started processing
+            // Auto-retry mechanism: Enhanced with multiple fallback strategies
+            if (currentStatus === 'queued' && queuedSince && !stuckRetryAttempted) {
+              const timeStuck = Date.now() - queuedSince
+
+              // Progressive intervention: warning at 15s, action at 45s
+              if (timeStuck > 15000 && timeStuck < 45000) {
+                console.log(`[upload] Ingestion queued for ${Math.round(timeStuck/1000)}s - may be experiencing delays`)
+              } else if (timeStuck > 45000) { // Increased from 30s to 45s for more patience
+                console.log('[upload] Ingestion stuck in queued status for', timeStuck, 'ms, attempting direct processing...')
+                setStuckRetryAttempted(true)
+                setStatus('retrying')
+
+                try {
+                  const retryRes = await fetch('/api/ingestions/process-direct', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ingestion_id: ingestionId })
+                  })
+
+                  if (retryRes.ok) {
+                    console.log('[upload] Direct processing triggered successfully')
+                    setProgress(25) // Show some progress
+                    setStatus('processing') // Update status to show progress
                   } else {
-                    setError('Processing stuck - retry failed. Please try uploading again.')
-                    setStatus('failed')
+                    const retryError = await retryRes.json()
+                    console.error('[upload] Direct processing failed:', retryError)
+
+                    // Enhanced error handling
+                    if (retryRes.status === 400) {
+                      console.log('[upload] Ingestion no longer queued - likely processing normally')
+                      // Reset the stuck retry flag to allow future attempts if needed
+                      setStuckRetryAttempted(false)
+                    } else if (retryRes.status === 429) {
+                      console.log('[upload] Rate limited - will retry later')
+                      setStuckRetryAttempted(false)
+                      setPollInterval(15000) // Back off polling
+                    } else {
+                      setError(`Processing stuck - retry failed (${retryRes.status}). Please try uploading again.`)
+                      setStatus('failed')
+                    }
                   }
+                } catch (retryErr) {
+                  console.error('[upload] Direct processing request failed:', retryErr)
+                  setError('Processing stuck - network error during retry. Please try uploading again.')
+                  setStatus('failed')
                 }
-              } catch (retryErr) {
-                console.error('[upload] Direct processing request failed:', retryErr)
-                setError('Processing stuck - retry failed. Please try uploading again.')
-                setStatus('failed')
               }
             }
-          }
           
           if (currentStatus === 'succeeded' || currentStatus === 'failed') {
             if (timer) clearInterval(timer)
           }
-        } else {
-          // Stop polling on HTTP errors to reduce server load
-          console.warn('[upload] Status API returned error, stopping polling:', r.status)
-          if (timer) clearInterval(timer)
-          if (r.status === 404) {
-            setError('Upload session expired. Please try uploading again.')
+          } else {
+            // Enhanced error handling with retry logic
+            console.warn('[upload] Status API returned error:', r.status)
+
+            if (retryCount < maxRetries) {
+              setRetryCount(prev => prev + 1)
+              setPollInterval(Math.min(pollInterval * 1.5, 30000)) // Exponential backoff
+              console.log(`[upload] Will retry in ${pollInterval}ms (attempt ${retryCount + 1}/${maxRetries})`)
+            } else {
+              console.error('[upload] Max retries reached, stopping polling')
+              if (timer) clearInterval(timer)
+
+              if (r.status === 404) {
+                setError('Upload session expired. Please try uploading again.')
+                setStatus('failed')
+              } else if (r.status >= 500) {
+                setError('Server error. Please wait a moment and try uploading again.')
+                setStatus('failed')
+              } else {
+                setError(`API error (${r.status}). Please try uploading again.`)
+                setStatus('failed')
+              }
+            }
+          }
+        } catch (fetchError) {
+          console.warn('[upload] Network error during status check:', fetchError)
+
+          if (retryCount < maxRetries) {
+            setRetryCount(prev => prev + 1)
+            setPollInterval(Math.min(pollInterval * 1.5, 30000)) // Exponential backoff
+            console.log(`[upload] Network error - will retry in ${pollInterval}ms (attempt ${retryCount + 1}/${maxRetries})`)
+          } else {
+            console.error('[upload] Max network retries reached, stopping polling')
+            if (timer) clearInterval(timer)
+            setError('Network connection issues. Please check your connection and try again.')
             setStatus('failed')
           }
         }
-        } catch (fetchError) {
-          console.warn('[upload] Network error during status check:', fetchError)
-          // Don't stop polling on network errors, just log them
-        }
-      }, 4000) // Changed from 2000ms to 4000ms
+      }
+
+      // Start polling
+      pollStatus()
+      timer = setInterval(pollStatus, pollInterval)
     }
     return () => { if (timer) clearInterval(timer) }
-  }, [ingestionId, projectId, queuedSince, stuckRetryAttempted])
+  }, [ingestionId, pollInterval, retryCount, maxRetries, queuedSince, stuckRetryAttempted])
 
   const upload = async () => {
     setError(null)
@@ -223,9 +285,27 @@ export default function UploadPage() {
                   />
                 </div>
                 
-                <p className="text-sm text-manthan-charcoal-600 mb-6">
-                  Status: <span className="font-medium capitalize">{status}</span> • {Math.max(progress, isProcessing ? 30 : 0)}%
-                </p>
+                <div className="text-sm text-manthan-charcoal-600 mb-6 space-y-1">
+                  <p>
+                    Status: <span className="font-medium capitalize">{status}</span> • {Math.max(progress, isProcessing ? 30 : 0)}%
+                  </p>
+                  {queuedSince && (
+                    <p className="text-xs text-manthan-charcoal-500">
+                      Queued for {Math.round((Date.now() - queuedSince) / 1000)}s
+                      {Math.round((Date.now() - queuedSince) / 1000) > 15 && ' - experiencing delays'}
+                    </p>
+                  )}
+                  {status === 'retrying' && (
+                    <p className="text-xs text-manthan-saffron-600">
+                      Attempting alternative processing method...
+                    </p>
+                  )}
+                  {retryCount > 0 && status !== 'retrying' && (
+                    <p className="text-xs text-manthan-charcoal-500">
+                      Connection retry {retryCount}/{maxRetries}
+                    </p>
+                  )}
+                </div>
                 
                 {/* Action Button */}
                 {isComplete && ingestionId && (
