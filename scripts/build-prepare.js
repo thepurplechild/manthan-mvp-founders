@@ -26,7 +26,7 @@ const requiredEnvVars = {
   'ADMIN_TOKEN': 'build-placeholder',
   'NEXT_PUBLIC_SUPABASE_URL': process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://build-placeholder.supabase.co',
   'NEXT_PUBLIC_SUPABASE_ANON_KEY': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'build-placeholder',
-  'SUPABASE_SERVICE_ROLE': process.env.SUPABASE_SERVICE_ROLE || 'build-placeholder'
+  'SUPABASE_SERVICE_ROLE_KEY': process.env.SUPABASE_SERVICE_ROLE_KEY || 'build-placeholder'
 };
 
 // Set fallback values for missing environment variables
