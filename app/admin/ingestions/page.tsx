@@ -1,15 +1,52 @@
 import { getServerClient } from '@/lib/supabase/server'
 // import Link from 'next/link'
 
+// Force dynamic rendering to prevent static generation issues
+export const dynamic = 'force-dynamic'
+
 export default async function AdminIngestions() {
-  const supabase = getServerClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    return (
-      <div className="p-6">Sign in required</div>
-    )
-  }
-  const { data: rows } = await supabase.from('ingestions').select('*').order('created_at', { ascending: false }).limit(50)
+  try {
+    const supabase = getServerClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError) {
+      return (
+        <div className="p-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h2 className="text-lg font-semibold text-red-800 mb-2">Authentication Error</h2>
+            <p className="text-red-700">Failed to authenticate: {authError.message}</p>
+          </div>
+        </div>
+      )
+    }
+
+    if (!user) {
+      return (
+        <div className="p-6">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h2 className="text-lg font-semibold text-yellow-800 mb-2">Access Required</h2>
+            <p className="text-yellow-700">Please sign in to access the admin panel.</p>
+          </div>
+        </div>
+      )
+    }
+
+    const { data: rows, error: queryError } = await supabase
+      .from('ingestions')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    if (queryError) {
+      return (
+        <div className="p-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h2 className="text-lg font-semibold text-red-800 mb-2">Database Error</h2>
+            <p className="text-red-700">Failed to fetch ingestions: {queryError.message}</p>
+          </div>
+        </div>
+      )
+    }
 
   return (
     <div className="container mx-auto p-6">
@@ -53,4 +90,20 @@ export default async function AdminIngestions() {
       </div>
     </div>
   )
+
+  } catch (error) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h2 className="text-lg font-semibold text-red-800 mb-2">System Error</h2>
+          <p className="text-red-700">
+            An unexpected error occurred: {error instanceof Error ? error.message : 'Unknown error'}
+          </p>
+          <p className="text-red-600 text-sm mt-2">
+            This may be due to missing environment variables or configuration issues.
+          </p>
+        </div>
+      </div>
+    )
+  }
 }
