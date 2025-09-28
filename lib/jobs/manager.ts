@@ -75,7 +75,7 @@ export class JobManager {
    * Mark an AI processing job as started
    */
   async markAIJobAsProcessing(projectId: string, step: string): Promise<void> {
-    const { error } = await this.supabase.rpc('fn_mark_ai_job_processing', {
+    const { error } = await (this.supabase as any).rpc('fn_mark_ai_job_processing', {
       p_project_id: projectId,
       p_step: step
     });
@@ -93,7 +93,7 @@ export class JobManager {
     step: string,
     processingDurationMs?: number
   ): Promise<void> {
-    const { error } = await this.supabase.rpc('fn_mark_ai_job_completed', {
+    const { error } = await (this.supabase as any).rpc('fn_mark_ai_job_completed', {
       p_project_id: projectId,
       p_step: step,
       p_processing_duration_ms: processingDurationMs
@@ -113,7 +113,7 @@ export class JobManager {
     errorMessage: string,
     errorDetails?: any
   ): Promise<void> {
-    const { error } = await this.supabase.rpc('fn_mark_ai_job_failed', {
+    const { error } = await (this.supabase as any).rpc('fn_mark_ai_job_failed', {
       p_project_id: projectId,
       p_step: step,
       p_error_message: errorMessage,
@@ -129,7 +129,7 @@ export class JobManager {
    * Update job heartbeat to indicate it's still alive
    */
   async updateJobHeartbeat(jobType: JobType, jobId: string): Promise<void> {
-    const { error } = await this.supabase.rpc('fn_update_job_heartbeat', {
+    const { error } = await (this.supabase as any).rpc('fn_update_job_heartbeat', {
       p_job_type: jobType,
       p_job_id: jobId
     });
@@ -154,7 +154,7 @@ export class JobManager {
     processingDurationMs?: number;
     metadata?: any;
   }): Promise<string> {
-    const { data, error } = await this.supabase.rpc('fn_log_job_event', {
+    const { data, error } = await (this.supabase as any).rpc('fn_log_job_event', {
       p_project_id: params.projectId || null,
       p_ingestion_id: params.ingestionId || null,
       p_job_type: params.jobType,
@@ -185,7 +185,7 @@ export class JobManager {
     stuckOnly?: boolean;
     limit?: number;
   }): Promise<ProcessingJob[]> {
-    let query = this.supabase
+    let query = (this.supabase as any)
       .from('v_processing_jobs')
       .select('*')
       .order('created_at', { ascending: false });
@@ -224,7 +224,7 @@ export class JobManager {
    * Get job statistics for monitoring dashboard
    */
   async getJobStatistics(hoursBack: number = 24): Promise<JobStatistics> {
-    const { data, error } = await this.supabase.rpc('fn_get_job_statistics', {
+    const { data, error } = await (this.supabase as any).rpc('fn_get_job_statistics', {
       p_hours_back: hoursBack
     });
 
@@ -239,7 +239,7 @@ export class JobManager {
    * Recover stuck jobs automatically
    */
   async recoverStuckJobs(): Promise<JobRecoveryResult> {
-    const { data, error } = await this.supabase.rpc('fn_recover_stuck_jobs');
+    const { data, error } = await (this.supabase as any).rpc('fn_recover_stuck_jobs');
 
     if (error) {
       throw new Error(`Failed to recover stuck jobs: ${error.message}`);
@@ -254,7 +254,7 @@ export class JobManager {
   async retryJob(jobType: JobType, jobId: string): Promise<void> {
     if (jobType === 'ai_processing') {
       // Get the job details first
-      const { data: job, error: jobError } = await this.supabase
+      const { data: job, error: jobError } = await (this.supabase as any)
         .from('ai_processing_status')
         .select('project_id, step, retry_count, max_retries')
         .eq('id', jobId)
@@ -264,12 +264,12 @@ export class JobManager {
         throw new Error(`Failed to fetch AI job: ${jobError.message}`);
       }
 
-      if (job.retry_count >= job.max_retries) {
-        throw new Error(`Job has reached maximum retry limit (${job.max_retries})`);
+      if ((job as any).retry_count >= (job as any).max_retries) {
+        throw new Error(`Job has reached maximum retry limit (${(job as any).max_retries})`);
       }
 
       // Reset the job
-      const { error } = await this.supabase
+      const { error } = await (this.supabase as any)
         .from('ai_processing_status')
         .update({
           status: 'pending',
@@ -285,7 +285,7 @@ export class JobManager {
 
       // Log the retry event
       await this.logJobEvent({
-        projectId: job.project_id,
+        projectId: (job as any).project_id,
         jobType: 'ai_processing',
         jobId,
         eventType: 'retried',
@@ -296,7 +296,7 @@ export class JobManager {
 
     } else if (jobType === 'ingestion') {
       // Get the job details first
-      const { data: job, error: jobError } = await this.supabase
+      const { data: job, error: jobError } = await (this.supabase as any)
         .from('ingestion_steps')
         .select('ingestion_id, attempt, max_retries')
         .eq('id', jobId)
@@ -306,12 +306,12 @@ export class JobManager {
         throw new Error(`Failed to fetch ingestion job: ${jobError.message}`);
       }
 
-      if (job.attempt >= job.max_retries) {
-        throw new Error(`Job has reached maximum retry limit (${job.max_retries})`);
+      if ((job as any).attempt >= (job as any).max_retries) {
+        throw new Error(`Job has reached maximum retry limit (${(job as any).max_retries})`);
       }
 
       // Reset the job
-      const { error } = await this.supabase
+      const { error } = await (this.supabase as any)
         .from('ingestion_steps')
         .update({
           status: 'queued',
@@ -327,7 +327,7 @@ export class JobManager {
 
       // Log the retry event
       await this.logJobEvent({
-        ingestionId: job.ingestion_id,
+        ingestionId: (job as any).ingestion_id,
         jobType: 'ingestion',
         jobId,
         eventType: 'retried',
@@ -345,7 +345,7 @@ export class JobManager {
     const table = jobType === 'ai_processing' ? 'ai_processing_status' : 'ingestion_steps';
     const statusField = jobType === 'ai_processing' ? 'status' : 'status';
 
-    const { error } = await this.supabase
+    const { error } = await (this.supabase as any)
       .from(table)
       .update({
         [statusField]: 'failed',
@@ -381,7 +381,7 @@ export class JobManager {
     limit?: number;
     hoursBack?: number;
   }): Promise<any[]> {
-    let query = this.supabase
+    let query = (this.supabase as any)
       .from('job_events')
       .select('*')
       .order('created_at', { ascending: false });
@@ -481,5 +481,3 @@ export function createJobManager(): JobManager {
   return new JobManager(supabaseUrl, supabaseKey);
 }
 
-// Export types for use in other modules
-export type { ProcessingJob, JobStatistics, JobRecoveryResult };

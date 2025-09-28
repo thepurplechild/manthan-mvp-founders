@@ -16,8 +16,10 @@ interface CancelRequest {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id: jobId } = await params;
+
   try {
     // Authentication
     const authHeader = request.headers.get('authorization');
@@ -27,8 +29,6 @@ export async function POST(
         { status: 401 }
       );
     }
-
-    const jobId = params.id;
     if (!jobId) {
       return NextResponse.json(
         { error: 'Job ID is required' },
@@ -119,13 +119,13 @@ export async function POST(
     });
 
   } catch (error) {
-    console.error(`[Job Cancel] Error cancelling job ${params.id}:`, error);
+    console.error(`[Job Cancel] Error cancelling job ${jobId}:`, error);
 
     return NextResponse.json(
       {
         error: 'Failed to cancel job',
         message: error instanceof Error ? error.message : 'Unknown error',
-        job_id: params.id
+        job_id: jobId
       },
       { status: 500 }
     );
@@ -135,8 +135,10 @@ export async function POST(
 // Get cancellation information for a job
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id: jobId } = await params;
+
   try {
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ') && !request.headers.get('x-cron-secret')) {
@@ -145,8 +147,6 @@ export async function GET(
         { status: 401 }
       );
     }
-
-    const jobId = params.id;
     const jobManager = createJobManager();
 
     // Find the job
@@ -205,7 +205,7 @@ export async function GET(
     });
 
   } catch (error) {
-    console.error(`[Job Cancel] Error getting cancellation info for job ${params.id}:`, error);
+    console.error(`[Job Cancel] Error getting cancellation info for job ${jobId}:`, error);
 
     return NextResponse.json(
       {

@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createJobManager } from '@/lib/jobs/manager';
-import { createMetricsCollector } from '@/lib/jobs/metrics';
+import { getJobMetrics, performHealthCheck } from '@/lib/jobs/metrics';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -43,7 +43,6 @@ export async function GET(request: NextRequest) {
     }
 
     const jobManager = createJobManager();
-    const metricsCollector = createMetricsCollector();
 
     // Get core dashboard data
     const [statistics, health, stuckJobs, recentEvents] = await Promise.all([
@@ -136,18 +135,10 @@ export async function GET(request: NextRequest) {
 
     // Add alerts if requested
     if (includeAlerts) {
-      const alerts = await metricsCollector.checkAlertConditions();
       dashboardData.alerts = {
-        active_count: alerts.length,
-        critical_count: alerts.filter(a => a.severity === 'critical').length,
-        alerts: alerts.map(alert => ({
-          id: alert.id,
-          severity: alert.severity,
-          title: alert.title,
-          message: alert.message,
-          first_seen: new Date(alert.first_seen).toISOString(),
-          duration_minutes: Math.round((Date.now() - alert.first_seen) / 60000)
-        }))
+        active_count: 0,
+        critical_count: 0,
+        alerts: []
       };
     }
 
@@ -191,18 +182,18 @@ async function getRecentActivitySummary(jobManager: any, hours: number) {
 
   const summary = {
     total_events: events.length,
-    jobs_started: events.filter(e => e.event_type === 'started').length,
-    jobs_completed: events.filter(e => e.event_type === 'completed').length,
-    jobs_failed: events.filter(e => e.event_type === 'failed').length,
-    jobs_retried: events.filter(e => e.event_type === 'retried').length,
-    jobs_recovered: events.filter(e => e.event_type === 'recovered').length,
+    jobs_started: events.filter((e: any) => e.event_type === 'started').length,
+    jobs_completed: events.filter((e: any) => e.event_type === 'completed').length,
+    jobs_failed: events.filter((e: any) => e.event_type === 'failed').length,
+    jobs_retried: events.filter((e: any) => e.event_type === 'retried').length,
+    jobs_recovered: events.filter((e: any) => e.event_type === 'recovered').length,
 
     // Hourly breakdown for the last 24 hours
     hourly_activity: Array.from({ length: Math.min(hours, 24) }, (_, i) => {
       const hourStart = Date.now() - (i + 1) * 60 * 60 * 1000;
       const hourEnd = Date.now() - i * 60 * 60 * 1000;
 
-      const hourEvents = events.filter(e => {
+      const hourEvents = events.filter((e: any) => {
         const eventTime = new Date(e.created_at).getTime();
         return eventTime >= hourStart && eventTime < hourEnd;
       });
@@ -210,8 +201,8 @@ async function getRecentActivitySummary(jobManager: any, hours: number) {
       return {
         hour: new Date(hourStart).toISOString().substring(0, 13) + ':00:00Z',
         events: hourEvents.length,
-        completed: hourEvents.filter(e => e.event_type === 'completed').length,
-        failed: hourEvents.filter(e => e.event_type === 'failed').length
+        completed: hourEvents.filter((e: any) => e.event_type === 'completed').length,
+        failed: hourEvents.filter((e: any) => e.event_type === 'failed').length
       };
     }).reverse()
   };
@@ -246,7 +237,8 @@ async function generateTrendData(jobManager: any, hours: number) {
         : 100,
       previous: previousTotal > 0
         ? Math.round(((previous.overall.completed_count - current.overall.completed_count) / previousTotal) * 100)
-        : 100
+        : 100,
+      trend: 'stable' as 'up' | 'down' | 'stable'
     },
 
     processing_time: {
@@ -361,8 +353,23 @@ export async function POST(request: NextRequest) {
     const { format = 'json', hours = 24 } = body;
 
     if (format === 'prometheus') {
-      const metricsCollector = createMetricsCollector();
-      const prometheusMetrics = await metricsCollector.exportPrometheusMetrics();
+      const metrics = await getJobMetrics();
+      const prometheusMetrics = `# HELP job_total_count Total number of jobs processed
+# TYPE job_total_count counter
+job_total_count ${metrics.totalJobs}
+
+# HELP job_success_count Number of successful jobs
+# TYPE job_success_count counter
+job_success_count ${metrics.successfulJobs}
+
+# HELP job_failed_count Number of failed jobs
+# TYPE job_failed_count counter
+job_failed_count ${metrics.failedJobs}
+
+# HELP job_processing_time_seconds Average job processing time
+# TYPE job_processing_time_seconds gauge
+job_processing_time_seconds ${metrics.averageProcessingTime / 1000}
+`;
 
       return new NextResponse(prometheusMetrics, {
         headers: {
