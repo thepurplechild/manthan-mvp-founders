@@ -156,8 +156,8 @@ async function recordRightsAcceptance(
 
     console.log('🔄 Recording rights acceptance...', { userId, version, hasIP: !!ipAddress });
 
-    // Use the RPC function for atomic operation
-    const { data, error } = await supabaseAdmin.rpc('record_rights_acceptance', {
+    // Use the fixed RPC function for atomic operation
+    const { data, error } = await supabaseAdmin.rpc('record_rights_acceptance_fixed', {
       p_user_id: userId,
       p_version: version,
       p_ip_address: ipAddress

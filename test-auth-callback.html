@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Auth Callback</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: #f9f9f9;
+        }
+        .test-link {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 5px;
+        }
+        .test-link:hover {
+            background: #0056b3;
+        }
+        .info {
+            background: #e7f3ff;
+            padding: 10px;
+            border-left: 4px solid #007bff;
+            margin: 10px 0;
+        }
+        .warning {
+            background: #fff3cd;
+            padding: 10px;
+            border-left: 4px solid #ffc107;
+            margin: 10px 0;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Authentication Callback Tester</h1>
+        <p>Use this page to test different authentication callback scenarios that might cause the "Invalid verification parameters" error.</p>
+
+        <div class="info">
+            <strong>Before testing:</strong> Make sure your local server is running on <code>http://localhost:3000</code>
+        </div>
+
+        <div class="test-section">
+            <h3>1. PKCE Flow (Modern)</h3>
+            <p>Tests the OAuth code exchange flow (recommended by Supabase)</p>
+            <a href="http://localhost:3000/auth/callback?code=test_auth_code_123456&next=/dashboard" class="test-link">
+                Test PKCE Flow
+            </a>
+        </div>
+
+        <div class="test-section">
+            <h3>2. Direct Token Flow</h3>
+            <p>Tests direct access token authentication (common in email verification)</p>
+            <a href="http://localhost:3000/auth/callback?access_token=test_access_token_123&refresh_token=test_refresh_token_456&expires_in=3600&token_type=bearer&type=signup" class="test-link">
+                Test Token Flow
+            </a>
+        </div>
+
+        <div class="test-section">
+            <h3>3. Legacy Token Hash Flow</h3>
+            <p>Tests the legacy email verification flow</p>
+            <a href="http://localhost:3000/auth/callback?token_hash=abcdef123456&type=signup&next=/dashboard" class="test-link">
+                Test Legacy Flow
+            </a>
+        </div>
+
+        <div class="test-section">
+            <h3>4. Hash Fragment Flow</h3>
+            <p>Tests authentication with URL fragments (some flows use this)</p>
+            <a href="http://localhost:3000/auth/callback#access_token=fragment_token_123&refresh_token=fragment_refresh_456&type=signup" class="test-link">
+                Test Fragment Flow
+            </a>
+        </div>
+
+        <div class="test-section">
+            <h3>5. Empty Parameters (Error Test)</h3>
+            <p>Tests the error case that was causing the original issue</p>
+            <a href="http://localhost:3000/auth/callback" class="test-link">
+                Test Empty Parameters
+            </a>
+        </div>
+
+        <div class="test-section">
+            <h3>6. Malformed Parameters (Error Test)</h3>
+            <p>Tests various malformed parameter scenarios</p>
+            <a href="http://localhost:3000/auth/callback?invalid=true&random=params" class="test-link">
+                Test Malformed Params
+            </a>
+        </div>
+
+        <div class="warning">
+            <strong>Note:</strong> These are test URLs with fake tokens. In development, they will show error pages, but you should see detailed debugging information in:
+            <ul>
+                <li>Browser developer console</li>
+                <li>Your Next.js server console</li>
+                <li>The error page itself (in development mode)</li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <h3>Expected Results</h3>
+            <pre>✅ PKCE Flow: Should show "Code exchange failed" (expected with test token)
+✅ Token Flow: Should show "Token session failed" (expected with test token)
+✅ Legacy Flow: Should redirect to /auth/confirm
+✅ Fragment Flow: Should show "Token session failed" (expected with test token)
+✅ Empty Params: Should show detailed error with "No parameters found in URL"
+✅ Malformed: Should show detailed error with "Available parameters: invalid, random"</pre>
+        </div>
+
+        <div class="test-section">
+            <h3>Debugging Information</h3>
+            <p>Check your browser's developer console and server logs for detailed debugging output like:</p>
+            <pre>🚀 Auth callback received: {
+  url: "/auth/callback?code=test_auth_code_123456&next=/dashboard",
+  hash: "",
+  origin: "http://localhost:3000",
+  params: {
+    hasCode: true,
+    hasTokenHash: false,
+    hasAccessToken: false,
+    hasRefreshToken: false,
+    hasError: false,
+    type: null,
+    next: "/dashboard"
+  }
+}</pre>
+        </div>
+
+        <div class="info">
+            <strong>Production Testing:</strong> To test with real Supabase tokens, trigger actual email verification flows through your sign-up form.
+        </div>
+    </div>
+
+    <script>
+        // Log current URL info for debugging
+        console.log('Current page info:', {
+            href: window.location.href,
+            search: window.location.search,
+            hash: window.location.hash,
+            hostname: window.location.hostname,
+            port: window.location.port
+        });
+
+        // Add click handlers to log test clicks
+        document.querySelectorAll('.test-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                console.log('Testing auth callback with URL:', this.href);
+            });
+        });
+    </script>
+</body>
+</html>

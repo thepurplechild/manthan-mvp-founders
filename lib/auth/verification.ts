@@ -371,7 +371,7 @@ export async function resendVerificationEmail(email: string): Promise<{
       type: 'signup',
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/confirm?next=/dashboard`
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`
       },
     } as any);
 

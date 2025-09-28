@@ -227,14 +227,26 @@ export default function UploadPage() {
                 <p className="text-sm text-manthan-charcoal-600 mt-1">Supported formats: PDF, TXT, DOCX</p>
               </div>
               
-              <button 
-                className="btn-indian w-full flex items-center justify-center gap-3 py-4" 
-                disabled={!file || isProcessing} 
+              <button
+                className="btn-indian w-full flex items-center justify-center gap-3 py-4"
+                disabled={!file || isProcessing}
                 onClick={upload}
               >
                 <Upload className="w-5 h-5" />
                 {isProcessing ? 'Processing...' : 'Upload & Start AI Processing'}
               </button>
+
+              <div className="bg-manthan-saffron-50 border border-manthan-saffron-200 rounded-xl p-4 mt-4">
+                <p className="text-sm text-manthan-charcoal-700">
+                  <strong>💡 Pro Tip:</strong> For better organization and tracking, consider uploading your script directly to a specific project.
+                </p>
+                <Link
+                  href="/projects/new"
+                  className="text-manthan-saffron-600 hover:text-manthan-saffron-700 text-sm font-medium inline-flex items-center gap-1 mt-2"
+                >
+                  Create a new project first →
+                </Link>
+              </div>
             </div>
           </div>
 

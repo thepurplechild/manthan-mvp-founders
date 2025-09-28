@@ -78,6 +78,46 @@ export async function POST(req: NextRequest) {
     file_type: file?.type,
   });
 
+  // Validate project_id is provided
+  if (!projectId) {
+    log('upload_validation_failed', { user_id: user.id, reason: 'No project_id provided' });
+    return NextResponse.json({ error: 'Project ID is required' }, { status: 400 })
+  }
+
+  // Validate project exists and user owns it
+  log('project_validation_start', { user_id: user.id, project_id: projectId });
+
+  const { data: project, error: projectError } = await supabase
+    .from('projects')
+    .select('id, owner_id, title')
+    .eq('id', projectId)
+    .single()
+
+  if (projectError || !project) {
+    log('project_validation_failed', {
+      user_id: user.id,
+      project_id: projectId,
+      error: projectError?.message || 'Project not found',
+      error_code: projectError?.code
+    });
+    return NextResponse.json({ error: 'Project not found or access denied' }, { status: 404 })
+  }
+
+  if (project.owner_id !== user.id) {
+    log('project_ownership_failed', {
+      user_id: user.id,
+      project_id: projectId,
+      project_owner: project.owner_id
+    });
+    return NextResponse.json({ error: 'Access denied - you do not own this project' }, { status: 403 })
+  }
+
+  log('project_validation_success', {
+    user_id: user.id,
+    project_id: projectId,
+    project_title: project.title
+  });
+
   if (!file) {
     log('upload_validation_failed', { user_id: user.id, reason: 'No file provided' });
     return NextResponse.json({ error: 'No file' }, { status: 400 })
@@ -163,6 +203,8 @@ export async function POST(req: NextRequest) {
   });
 
   const adminSupabase = getAdminClient();
+
+  // Start database transaction by creating ingestion record
   const { data: ingestion, error } = await adminSupabase.from('ingestions').insert({
     user_id: user.id,
     project_id: projectId,
@@ -181,6 +223,19 @@ export async function POST(req: NextRequest) {
       error_details: error.details,
       using_admin_client: true,
     });
+
+    // Clean up uploaded file on database failure
+    try {
+      await supabase.storage.from('scripts').remove([path]);
+      log('storage_cleanup_success', { user_id: user.id, path });
+    } catch (cleanupError) {
+      log('storage_cleanup_failed', {
+        user_id: user.id,
+        path,
+        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+      });
+    }
+
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
@@ -253,7 +308,22 @@ export async function POST(req: NextRequest) {
       ingestion_id: ingestion.id,
       error: queueError instanceof Error ? queueError.message : String(queueError),
     });
-    // Continue even if queue fails - the cron job should pick it up from database
+
+    // For critical queue failures, consider marking ingestion as failed
+    // But for now, continue - the cron job should pick it up from database
+    // In production, you might want to implement more sophisticated retry logic
+
+    // Update ingestion with queue failure note (non-blocking)
+    try {
+      await adminSupabase
+        .from('ingestions')
+        .update({
+          error_message: `Queue enrollment failed: ${queueError instanceof Error ? queueError.message : String(queueError)}. Will retry via cron.`
+        })
+        .eq('id', ingestion.id);
+    } catch {
+      // Ignore update failures - the record is still valid
+    }
   }
 
   const duration = Date.now() - startTime;

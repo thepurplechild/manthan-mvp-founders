@@ -52,6 +52,23 @@ function validateVerificationParams(searchParams: URLSearchParams): {
     errors.push("Missing verification parameters");
   }
 
+  // If we have neither code nor token_hash, check for additional auth patterns
+  if (!code && !token_hash) {
+    // Check for access_token in the request (might be in URL fragments)
+    const access_token = searchParams.get("access_token");
+    const refresh_token = searchParams.get("refresh_token");
+
+    if (access_token && refresh_token) {
+      // This should be handled by the callback route, redirect there
+      console.log('Redirecting token-based auth to callback route');
+      return {
+        isValid: false,
+        errors: ["Token-based authentication should use /auth/callback"],
+        params: { next }
+      };
+    }
+  }
+
   // Validate code format if present (PKCE codes are typically base64url)
   if (code && !/^[A-Za-z0-9_-]+$/.test(code)) {
     errors.push("Invalid verification code format");

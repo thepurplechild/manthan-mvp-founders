@@ -292,11 +292,22 @@ function AcceptRightsContent() {
    * Handle rights acceptance with comprehensive error handling and robust navigation
    */
   const handleAcceptRights = useCallback(async (isRetry: boolean = false) => {
+    console.log('🚀 handleAcceptRights called:', {
+      isRetry,
+      acceptedRights,
+      hasUser: !!user,
+      userId: user?.id,
+      timestamp: new Date().toISOString(),
+      currentPath: window.location.pathname
+    });
+
     if (!acceptedRights || !user) {
+      console.error('❌ Validation failed:', { acceptedRights, hasUser: !!user });
       setError("You must accept the Creator's Bill of Rights to continue");
       return;
     }
 
+    console.log('✅ Validation passed, starting acceptance process...');
     setIsLoading(true);
     resetStates();
 
@@ -315,6 +326,13 @@ function AcceptRightsContent() {
         retryAttempt: currentRetryCount
       };
 
+      console.log('📡 Sending API request:', {
+        url: '/api/rights/accept',
+        method: 'POST',
+        body: requestBody,
+        headers: { 'Content-Type': 'application/json' }
+      });
+
       const response = await fetch('/api/rights/accept', {
         method: 'POST',
         headers: {
@@ -324,10 +342,19 @@ function AcceptRightsContent() {
         body: JSON.stringify(requestBody),
       });
 
+      console.log('📡 API response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+
       let payload: RightsAcceptanceResponse;
       try {
         payload = await response.json();
+        console.log('📦 API response payload:', payload);
       } catch (parseError) {
+        console.error('❌ Failed to parse response JSON:', parseError);
         throw new Error('Server returned invalid response format');
       }
 
@@ -348,20 +375,29 @@ function AcceptRightsContent() {
 
         // Critical: Refresh session and validate before navigation
         const hasValidRights = await refreshSessionAndValidateRights();
+        console.log('🔍 Rights validation result:', { hasValidRights, redirectUrl });
 
         if (hasValidRights) {
           console.log('✅ Rights validation confirmed, proceeding with navigation');
+          console.log('🎯 Will navigate to:', redirectUrl);
 
           // Add small delay for user feedback, then navigate
+          console.log('⏱️ Setting 1s delay before navigation...');
           setTimeout(() => {
+            console.log('🚀 Executing primary navigation...');
             performNavigation(redirectUrl, 'router');
           }, 1000);
 
           // Backup navigation in case primary fails
+          console.log('⏱️ Setting 5s backup navigation...');
           setTimeout(() => {
-            if (window.location.pathname === '/auth/accept-rights') {
-              console.warn('Primary navigation failed, using backup method');
+            const currentPath = window.location.pathname;
+            console.log('🔍 Backup navigation check:', { currentPath, stillOnRightsPage: currentPath === '/auth/accept-rights' });
+            if (currentPath === '/auth/accept-rights') {
+              console.warn('⚠️ Primary navigation failed, using backup method');
               performNavigation(redirectUrl, 'window');
+            } else {
+              console.log('✅ Navigation succeeded, backup not needed');
             }
           }, 5000);
 
@@ -585,7 +621,14 @@ function AcceptRightsContent() {
                 <Checkbox
                   id="rights-agreement"
                   checked={acceptedRights}
-                  onCheckedChange={(checked) => setAcceptedRights(checked as boolean)}
+                  onCheckedChange={(checked) => {
+                    console.log('☑️ Checkbox state changed:', {
+                      from: acceptedRights,
+                      to: checked,
+                      timestamp: new Date().toISOString()
+                    });
+                    setAcceptedRights(checked as boolean);
+                  }}
                   className="mt-1 border-white/30 data-[state=checked]:bg-purple-500 data-[state=checked]:border-purple-500"
                   disabled={isLoading || navigationState.isNavigating}
                 />
@@ -647,7 +690,17 @@ function AcceptRightsContent() {
             <div className="space-y-4">
               <button
                 type="button"
-                onClick={() => handleAcceptRights(false)}
+                onClick={() => {
+                  console.log('🔘 "Accept and Continue" button clicked!', {
+                    acceptedRights,
+                    isLoading,
+                    hasUser: !!user,
+                    hasSuccessMessage: !!successMessage,
+                    isNavigating: navigationState.isNavigating,
+                    timestamp: new Date().toISOString()
+                  });
+                  handleAcceptRights(false);
+                }}
                 disabled={isLoading || !acceptedRights || !!successMessage || navigationState.isNavigating}
                 className="w-full h-12 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/25 backdrop-blur-sm border border-white/20 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-purple-500/40 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >

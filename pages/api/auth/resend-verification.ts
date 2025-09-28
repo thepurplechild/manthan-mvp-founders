@@ -86,7 +86,7 @@ export default async function handler(
       type: 'signup',
       email,
       options: {
-        emailRedirectTo: `${req.headers.origin || process.env.NEXT_PUBLIC_BASE_URL}/auth/confirm?next=/dashboard`
+        emailRedirectTo: `${req.headers.origin || process.env.NEXT_PUBLIC_BASE_URL}/auth/callback?next=/dashboard`
       },
     });
 
