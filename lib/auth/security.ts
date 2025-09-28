@@ -11,7 +11,7 @@ import { createHash } from 'crypto';
  */
 const RATE_LIMITS = {
   signIn: { maxAttempts: 5, windowMs: 15 * 60 * 1000 }, // 5 attempts per 15 minutes
-  signUp: { maxAttempts: 3, windowMs: 60 * 60 * 1000 }, // 3 attempts per hour
+  signUp: { maxAttempts: 50, windowMs: 60 * 60 * 1000 }, // 50 attempts per hour
   resendEmail: { maxAttempts: 3, windowMs: 5 * 60 * 1000 }, // 3 resends per 5 minutes
   resetPassword: { maxAttempts: 3, windowMs: 60 * 60 * 1000 }, // 3 resets per hour
 } as const;
