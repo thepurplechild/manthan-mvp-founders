@@ -1,24 +1,28 @@
-// Job orchestrator endpoint. This endpoint creates processing jobs for ingestions
-// and requires the CRON_SECRET header. It bypasses RLS using the Supabase service
-// role key and must NEVER be exposed to end-users.
+// Human-in-the-loop ingestion preprocessor endpoint. This endpoint only executes
+// the first step: file parsing and structural analysis. Requires CRON_SECRET header.
+// Bypasses RLS using the Supabase service role key and must NEVER be exposed to end-users.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { ingestFile } from '@/lib/ingestion/core';
 
-// Processing steps for the new async workflow
-const PROCESSING_STEPS = [
-  'extract_text',
-  'generate_summary',
-  'create_action_items',
-  'finalize'
+// Human-in-the-loop pipeline steps - only first step is automated
+const STEP_SEQUENCE = [
+  'script_preprocess',
+  'core_extraction',
+  'character_bible',
+  'visuals',
+  'market_adaptation',
+  'package_assembly',
+  'final_package'
 ] as const;
 
-type ProcessingStep = (typeof PROCESSING_STEPS)[number];
+type StepName = (typeof STEP_SEQUENCE)[number];
 
 function log(event: string, payload: Record<string, unknown>) {
   console.log(
     JSON.stringify({
-      scope: 'orchestrator',
+      scope: 'preprocessor',
       event,
       ts: new Date().toISOString(),
       ...payload,
@@ -26,21 +30,74 @@ function log(event: string, payload: Record<string, unknown>) {
   );
 }
 
-async function createProcessingJobs(
+async function ensureStepsExist(
   supabase: ReturnType<typeof getAdminClient>,
   ingestionId: string
 ) {
-  // Call the database function to create processing jobs
-  const { error } = await supabase.rpc('create_processing_jobs', {
-    p_ingestion_id: ingestionId
-  });
+  // Get existing steps
+  const { data: existingSteps } = await supabase
+    .from('ingestion_steps')
+    .select('name')
+    .eq('ingestion_id', ingestionId);
 
-  if (error) {
-    log('job_creation_error', { ingestion_id: ingestionId, err: error.message });
-    throw new Error(`Failed to create processing jobs: ${error.message}`);
+  const existingNames = new Set((existingSteps || []).map(s => s.name));
+  const missing: StepName[] = [];
+
+  // Check which steps are missing
+  for (const step of STEP_SEQUENCE) {
+    if (!existingNames.has(step)) {
+      missing.push(step);
+    }
   }
 
-  log('jobs_created', { ingestion_id: ingestionId, steps: PROCESSING_STEPS });
+  // Create missing steps
+  if (missing.length > 0) {
+    const { error } = await supabase.from('ingestion_steps').insert(
+      missing.map((name) => ({
+        ingestion_id: ingestionId,
+        name,
+        status: 'queued'
+      }))
+    );
+
+    if (error) {
+      log('step_creation_error', { ingestion_id: ingestionId, err: error.message });
+      throw new Error(`Failed to create ingestion steps: ${error.message}`);
+    }
+
+    log('steps_created', { ingestion_id: ingestionId, created: missing });
+  }
+}
+
+async function updateStep(
+  supabase: ReturnType<typeof getAdminClient>,
+  ingestionId: string,
+  stepName: StepName,
+  patch: {
+    status: 'queued' | 'running' | 'succeeded' | 'failed';
+    started_at?: string;
+    finished_at?: string;
+    output?: Record<string, unknown> | null;
+    error?: string | null;
+  }
+) {
+  const { error } = await supabase
+    .from('ingestion_steps')
+    .update({
+      ...patch,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('ingestion_id', ingestionId)
+    .eq('name', stepName);
+
+  if (error) {
+    log('step_update_error', {
+      ingestion_id: ingestionId,
+      step: stepName,
+      err: error.message
+    });
+    throw new Error(`Failed to update step ${stepName}: ${error.message}`);
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -48,7 +105,7 @@ export async function POST(request: NextRequest) {
   const userAgent = request.headers.get('user-agent') || 'unknown';
   const origin = request.headers.get('origin') || new URL(request.url).origin;
 
-  log('orchestrator_request_start', {
+  log('preprocessor_request_start', {
     user_agent: userAgent,
     origin,
     has_cron_secret: Boolean(process.env.CRON_SECRET),
@@ -91,7 +148,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing ingestionId' }, { status: 400 });
   }
 
-  log('job_orchestration_start', {
+  log('preprocessing_start', {
     ingestion_id: ingestionId,
     trigger: body.trigger || 'unknown',
   });
@@ -128,7 +185,7 @@ export async function POST(request: NextRequest) {
       .from('ingestions')
       .update({
         status: 'processing',
-        progress: 10,
+        progress: 5,
         error: null,
         updated_at: new Date().toISOString(),
       })
@@ -142,37 +199,149 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update ingestion status' }, { status: 500 });
     }
 
-    // Create processing jobs for this ingestion
-    await createProcessingJobs(supabase, ingestionId);
+    // Ensure all pipeline steps exist in the database
+    await ensureStepsExist(supabase, ingestionId);
+
+    // Download the script file from Supabase Storage
+    log('file_download_start', { ingestion_id: ingestionId });
+    const { data: fileResponse, error: downloadError } = await supabase.storage
+      .from('scripts')
+      .download(ingestion.source_file_url);
+
+    if (downloadError || !fileResponse) {
+      const msg = downloadError?.message || 'Unable to download source file';
+      log('download_failed', { ingestion_id: ingestionId, err: msg });
+
+      await updateStep(supabase, ingestionId, 'script_preprocess', {
+        status: 'failed',
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        error: msg
+      });
+
+      await supabase
+        .from('ingestions')
+        .update({
+          status: 'failed',
+          error: msg,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', ingestionId);
+
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+
+    const arrayBuffer = await fileResponse.arrayBuffer();
+    const scriptBuffer = Buffer.from(arrayBuffer);
+
+    log('download_complete', {
+      ingestion_id: ingestionId,
+      size: scriptBuffer.length,
+    });
+
+    // Execute ONLY the preprocessing step
+    await updateStep(supabase, ingestionId, 'script_preprocess', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    });
+
+    log('preprocessing_execute', { ingestion_id: ingestionId });
+
+    // Parse the file using the ingestion core
+    const parseResult = await ingestFile(
+      ingestion.source_file_url.split('/').pop() || 'script',
+      scriptBuffer,
+      ingestion.mime_type || undefined,
+      { extractMetadata: true }
+    );
+
+    if (!parseResult.success) {
+      const errorMsg = parseResult.error?.message || 'File parsing failed';
+      log('preprocessing_failed', { ingestion_id: ingestionId, err: errorMsg });
+
+      await updateStep(supabase, ingestionId, 'script_preprocess', {
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+        error: errorMsg
+      });
+
+      await supabase
+        .from('ingestions')
+        .update({
+          status: 'failed',
+          error: errorMsg,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', ingestionId);
+
+      return NextResponse.json({ error: errorMsg }, { status: 500 });
+    }
+
+    // Save the parsed output to the database
+    const preprocessOutput = {
+      textContent: parseResult.content?.textContent || '',
+      metadata: parseResult.content?.metadata || {},
+      contentType: parseResult.content?.contentType || 'unknown',
+      checksum: parseResult.content?.checksum,
+      extractedAt: new Date().toISOString(),
+      warnings: parseResult.warnings || []
+    };
+
+    await updateStep(supabase, ingestionId, 'script_preprocess', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: preprocessOutput
+    });
+
+    // Update ingestion to pending review for founder to trigger next step
+    await supabase
+      .from('ingestions')
+      .update({
+        status: 'pending_review',
+        progress: 15,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', ingestionId);
 
     const totalDuration = Date.now() - startTime;
 
-    log('orchestration_complete', {
+    log('preprocessing_complete', {
       ingestion_id: ingestionId,
       total_duration: totalDuration,
-      jobs_created: PROCESSING_STEPS.length,
+      text_length: preprocessOutput.textContent.length,
     });
 
     return NextResponse.json({
       ok: true,
       ingestionId,
-      jobsCreated: PROCESSING_STEPS.length,
-      message: 'Processing jobs created successfully',
-      duration: totalDuration
+      message: 'File preprocessing completed successfully. Ready for founder review.',
+      duration: totalDuration,
+      nextStep: 'core_extraction',
+      preprocessResult: {
+        textLength: preprocessOutput.textContent.length,
+        contentType: preprocessOutput.contentType,
+        warnings: preprocessOutput.warnings.length
+      }
     });
 
   } catch (error) {
     const totalDuration = Date.now() - startTime;
-    const message = error instanceof Error ? error.message : 'Unknown orchestrator error';
+    const message = error instanceof Error ? error.message : 'Unknown preprocessing error';
 
-    log('orchestration_failed', {
+    log('preprocessing_fatal_error', {
       ingestion_id: ingestionId,
       err: message,
       stack: error instanceof Error ? error.stack : undefined,
       total_duration: totalDuration,
     });
 
-    // Mark ingestion as failed
+    // Mark preprocessing step and ingestion as failed
+    await updateStep(supabase, ingestionId, 'script_preprocess', {
+      status: 'failed',
+      finished_at: new Date().toISOString(),
+      error: message
+    });
+
     await supabase
       .from('ingestions')
       .update({
