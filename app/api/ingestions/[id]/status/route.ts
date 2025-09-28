@@ -79,9 +79,9 @@ function estimateTimeRemaining(jobs: JobStatus[], ingestionCreatedAt: string): n
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const ingestionId = params.id;
+  const { id: ingestionId } = await params;
 
   if (!ingestionId) {
     return NextResponse.json({ error: 'Missing ingestion ID' }, { status: 400 });
@@ -187,9 +187,9 @@ export async function GET(
 // PATCH method to retry failed jobs
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const ingestionId = params.id;
+  const { id: ingestionId } = await params;
 
   if (!ingestionId) {
     return NextResponse.json({ error: 'Missing ingestion ID' }, { status: 400 });
