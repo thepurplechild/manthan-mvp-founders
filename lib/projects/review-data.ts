@@ -220,9 +220,12 @@ export async function loadProjectReviewData(
     status: step.status,
     started_at: step.started_at,
     finished_at: step.finished_at || step.completed_at || null,
-    error: typeof step.error_message === 'string'
-      ? step.error_message
-      : step.error_message?.message ?? null,
+    error:
+      typeof step.error_message === 'string'
+        ? step.error_message
+        : (typeof step.error_message === 'object' && step.error_message !== null && 'message' in step.error_message)
+        ? String((step.error_message as { message?: unknown }).message ?? '') || null
+        : null,
     retry_count: step.retry_count ?? 0,
     created_at: step.created_at,
     metadata: step.metadata ?? null,

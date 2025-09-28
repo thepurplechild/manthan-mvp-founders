@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 
-import { ProjectReviewData } from '@/app/projects/[id]/review/page'
+import type { ProjectReviewData } from '@/types/review'
 
 interface ScriptDisplaySectionProps {
   data: ProjectReviewData

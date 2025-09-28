@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import type { StorageObject } from '@supabase/storage-js'
+import type { FileObject } from '@supabase/storage-js'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -29,10 +29,10 @@ const createSupabaseClient = async () => {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const fileId = params.id
+    const { id: fileId } = await params
     const supabase = await createSupabaseClient()
 
     const {
@@ -106,7 +106,7 @@ export async function GET(
         limit: 1,
       })
 
-    const storageObjects: StorageObject[] = listedObjects ?? []
+    const storageObjects: FileObject[] = listedObjects ?? []
 
     if (listError || storageObjects.length === 0) {
       // Persist storage_exists=false for metadata accuracy

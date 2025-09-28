@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
-import { ProjectReviewData } from '@/app/projects/[id]/review/page'
+import type { ProjectReviewData } from '@/types/review'
 
 interface ProcessingStatusDashboardProps {
   data: ProjectReviewData

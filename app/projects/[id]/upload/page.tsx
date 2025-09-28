@@ -417,9 +417,16 @@ export default function ProjectUploadPage() {
           <div className="flex items-center gap-2 text-sm text-manthan-charcoal-600 mb-6">
             <Link href="/projects" className="hover:text-manthan-saffron-600">Projects</Link>
             <span>/</span>
-            <Link href={`/projects/${project?.id}`} className="hover:text-manthan-saffron-600">
-              {project?.title}
-            </Link>
+            {project?.id ? (
+              <Link
+                href={{ pathname: '/projects/[id]', query: { id: project.id } }}
+                className="hover:text-manthan-saffron-600"
+              >
+                {project.title}
+              </Link>
+            ) : (
+              <span className="text-manthan-charcoal-600">{project?.title ?? 'Project'}</span>
+            )}
             <span>/</span>
             <span className="text-manthan-charcoal-800 font-medium">Upload</span>
           </div>
@@ -529,9 +536,12 @@ export default function ProjectUploadPage() {
 
                 {/* Action Buttons */}
                 <div className="flex gap-4 justify-center">
-                  {isComplete && ingestionId && (
+                  {isComplete && ingestionId && project?.id && (
                     <Link
-                      href={`/projects/${project?.id}/results?ingestionId=${ingestionId}`}
+                      href={{
+                        pathname: '/projects/[id]/results',
+                        query: { id: project.id, ingestionId },
+                      }}
                       className="btn-indian inline-flex items-center gap-3 text-lg px-8 py-4"
                     >
                       View AI Processing Results
@@ -539,9 +549,9 @@ export default function ProjectUploadPage() {
                     </Link>
                   )}
 
-                  {(isFailed || isComplete) && (
+                  {(isFailed || isComplete) && project?.id && (
                     <Link
-                      href={`/projects/${project?.id}`}
+                      href={{ pathname: '/projects/[id]', query: { id: project.id } }}
                       className="btn-outline-indian inline-flex items-center gap-3"
                     >
                       <ArrowLeft className="w-4 h-4" />
@@ -575,12 +585,14 @@ export default function ProjectUploadPage() {
                   <h3 className="text-lg font-semibold text-manthan-charcoal-800">
                     Recent Files
                   </h3>
-                  <Link
-                    href={`/projects/${project?.id}/files`}
-                    className="text-manthan-saffron-600 hover:text-manthan-saffron-700 text-sm font-medium"
-                  >
-                    View All Files →
-                  </Link>
+                  {project?.id && (
+                    <Link
+                      href={{ pathname: '/projects/[id]/files', query: { id: project.id } }}
+                      className="text-manthan-saffron-600 hover:text-manthan-saffron-700 text-sm font-medium"
+                    >
+                      View All Files →
+                    </Link>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -607,9 +619,12 @@ export default function ProjectUploadPage() {
                             {file.ingestion_progress ?? 0}%
                           </span>
                         )}
-                        {file.status === 'completed' && file.ingestion_id && (
+                        {file.status === 'completed' && file.ingestion_id && project?.id && (
                           <Link
-                            href={`/projects/${project?.id}/results?ingestionId=${file.ingestion_id}`}
+                            href={{
+                              pathname: '/projects/[id]/results',
+                              query: { id: project.id, ingestionId: file.ingestion_id },
+                            }}
                             className="text-manthan-saffron-600 hover:text-manthan-saffron-700 text-xs"
                           >
                             View Results
@@ -625,13 +640,15 @@ export default function ProjectUploadPage() {
 
           {/* Back Navigation */}
           <div className="text-center mt-8">
-            <Link
-              href={`/projects/${project?.id}`}
-              className="text-manthan-charcoal-600 hover:text-manthan-saffron-600 text-sm inline-flex items-center gap-2"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back to {project?.title}
-            </Link>
+            {project?.id && (
+              <Link
+                href={{ pathname: '/projects/[id]', query: { id: project.id } }}
+                className="text-manthan-charcoal-600 hover:text-manthan-saffron-600 text-sm inline-flex items-center gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to {project?.title}
+              </Link>
+            )}
           </div>
         </div>
       </div>

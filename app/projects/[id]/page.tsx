@@ -16,7 +16,7 @@ async function fetchInitialOverview(projectId: string): Promise<ProjectOverviewR
     .map((cookie) => `${cookie.name}=${cookie.value}`)
     .join('; ')
 
-  const headerList = headers()
+  const headerList = await headers()
   const origin = headerList.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 
   try {

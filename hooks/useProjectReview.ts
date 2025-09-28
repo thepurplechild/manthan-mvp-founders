@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect } from 'react'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { createClient } from '@/lib/supabase/client'
 import type { ProjectReviewData } from '@/types/review'
@@ -31,7 +32,7 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const refreshTimeoutRef = useRef<NodeJS.Timeout>()
-  const realtimeChannelRef = useRef<ReturnType<typeof createClient>['channel'] | null>(null)
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null)
 
   const apiCall = useCallback(async (url: string, options: RequestInit = {}) => {
     const response = await fetch(url, {
@@ -129,6 +130,7 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
           feedback: feedback ? [...prev.approval_status.feedback, {
             id: Date.now().toString(),
             text: feedback,
+            rating: null,
             created_at: new Date().toISOString(),
             author: 'Current User'
           }] : prev.approval_status.feedback

@@ -1,3 +1,5 @@
+import type { UrlObject } from 'url'
+import type { Route } from 'next'
 import type { Project, ScriptUpload } from './database'
 
 export type TimelineStatus = 'pending' | 'current' | 'completed'
@@ -15,7 +17,7 @@ export interface ProjectNextAction {
   key: string
   title: string
   description: string
-  href?: string
+  href?: Route | UrlObject
   ctaLabel?: string
 }
 

@@ -268,10 +268,10 @@ const deriveLastActivity = (
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const projectId = params.id
+    const { id: projectId } = await params
     const cookieStore = await cookies()
 
     const supabase = createServerClient(
@@ -382,12 +382,14 @@ export async function GET(
     ingestions.forEach((ingestion) => {
       const key = ingestion.source_file_url
       if (!key) return
-      if (!ingestionMapByPath.has(key)) {
+      const existing = ingestionMapByPath.get(key)
+      if (!existing) {
         ingestionMapByPath.set(key, ingestion)
         return
       }
-      const existing = ingestionMapByPath.get(key)
-      if (new Date(ingestion.created_at).getTime() > new Date(existing.created_at).getTime()) {
+      const existingTime = existing.created_at ? new Date(existing.created_at).getTime() : Number.NEGATIVE_INFINITY
+      const candidateTime = ingestion.created_at ? new Date(ingestion.created_at).getTime() : Number.NEGATIVE_INFINITY
+      if (candidateTime > existingTime) {
         ingestionMapByPath.set(key, ingestion)
       }
     })

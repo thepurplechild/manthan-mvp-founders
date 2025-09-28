@@ -517,7 +517,7 @@ function deriveNextActions({
       key: 'upload-files',
       title: 'Upload script or supporting files',
       description: 'Kick off the AI workflow by uploading a script or project materials.',
-      href: `/projects/${project.id}/upload`,
+      href: { pathname: '/projects/[id]/upload', query: { id: project.id } },
       ctaLabel: 'Upload files',
     })
   }
@@ -528,7 +528,7 @@ function deriveNextActions({
       key: 'monitor-processing',
       title: 'Processing in progress',
       description: 'Monitor real-time progress and review logs while the AI prepares deliverables.',
-      href: `/projects/${project.id}/review`,
+      href: { pathname: '/projects/[id]/review', query: { id: project.id } },
       ctaLabel: 'Open processing dashboard',
     })
   }
@@ -538,7 +538,7 @@ function deriveNextActions({
       key: 'review-outputs',
       title: 'Review AI-generated outputs',
       description: 'Preview, rate, and approve the generated pitch materials.',
-      href: `/projects/${project.id}/review`,
+      href: { pathname: '/projects/[id]/review', query: { id: project.id } },
       ctaLabel: 'Review outputs',
     })
   }
@@ -548,7 +548,7 @@ function deriveNextActions({
       key: 'export-assets',
       title: 'Export and share deliverables',
       description: 'Download pitch decks, summaries, and shareables for your stakeholders.',
-      href: `/projects/${project.id}/review`,
+      href: { pathname: '/projects/[id]/review', query: { id: project.id } },
       ctaLabel: 'Open deliverables',
     })
   }

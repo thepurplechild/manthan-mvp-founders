@@ -149,13 +149,20 @@ const buildFileResponse = (
   const previewable = isPreviewableInline(scriptUpload?.mime_type || ingestion?.mime_type || null, fallbackName)
   const storageExists = scriptUpload?.storage_exists ?? true
   const status = mapIngestionStatusToFileStatus(ingestion?.status ?? null, scriptUpload?.status ?? 'uploaded')
+  const id = scriptUpload?.id ?? ingestion?.id
+  const projectId = scriptUpload?.project_id ?? ingestion?.project_id
+  const uploadedAt = scriptUpload?.uploaded_at ?? ingestion?.created_at
+
+  if (!id || !projectId || !uploadedAt) {
+    throw new Error('Missing required metadata for file response')
+  }
 
   return {
-    id: scriptUpload?.id || ingestion?.id,
-    project_id: scriptUpload?.project_id || ingestion?.project_id,
+    id,
+    project_id: projectId,
     type: scriptUpload && ingestion ? 'both' : scriptUpload ? 'script_upload' : 'ingestion_only',
-    storage_bucket: scriptUpload?.storage_bucket || 'scripts',
-    storage_path: scriptUpload?.file_path || ingestion?.source_file_url,
+    storage_bucket: scriptUpload?.storage_bucket ?? 'scripts',
+    storage_path: scriptUpload?.file_path ?? ingestion?.source_file_url ?? '',
     storage_exists: storageExists,
     file_name: fallbackName,
     mime_type: scriptUpload?.mime_type || ingestion?.mime_type || null,
@@ -163,8 +170,8 @@ const buildFileResponse = (
     version: scriptUpload?.version ?? 1,
     checksum: scriptUpload?.checksum ?? null,
     status: storageExists ? status : 'missing',
-    uploaded_at: scriptUpload?.uploaded_at || ingestion?.created_at,
-    updated_at: scriptUpload?.updated_at || ingestion?.updated_at || null,
+    uploaded_at: uploadedAt,
+    updated_at: scriptUpload?.updated_at ?? ingestion?.updated_at ?? null,
     ingestion: {
       id: ingestion?.id ?? null,
       status: ingestion?.status ?? null,
@@ -197,11 +204,10 @@ const buildFileResponse = (
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; fileId: string } }
+  { params }: { params: Promise<{ id: string; fileId: string }> }
 ) {
   try {
-    const projectId = params.id
-    const fileId = params.fileId
+    const { id: projectId, fileId } = await params
     const supabase = await createSupabaseClient()
 
     const {
@@ -249,11 +255,12 @@ export async function DELETE(
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
 
-    if (ingestion && ['running', 'queued', 'processing'].includes(ingestion.status)) {
+    const ingestionStatus = ingestion?.status ?? null
+    if (ingestionStatus && ['running', 'queued', 'processing'].includes(ingestionStatus)) {
       return NextResponse.json({ error: 'Cannot delete while processing is in progress' }, { status: 409 })
     }
 
-    const storagePath = (scriptUpload?.file_path || ingestion?.source_file_url || '').replace(/^\/+/, '')
+    const storagePath = (scriptUpload?.file_path ?? ingestion?.source_file_url ?? '').replace(/^\/+/, '')
     if (!storagePath) {
       return NextResponse.json({ error: 'File path missing' }, { status: 400 })
     }
@@ -343,11 +350,10 @@ export async function DELETE(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string; fileId: string } }
+  { params }: { params: Promise<{ id: string; fileId: string }> }
 ) {
   try {
-    const projectId = params.id
-    const fileId = params.fileId
+    const { id: projectId, fileId } = await params
     const supabase = await createSupabaseClient()
 
     const {

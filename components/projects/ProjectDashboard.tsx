@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
+import type { Route } from 'next'
+import type { UrlObject } from 'url'
 import {
   AlertCircle,
   ArrowLeft,
@@ -201,16 +203,16 @@ export function ProjectDashboard({
 
         {/* Primary navigation */}
         <div className="flex flex-wrap gap-2">
-          <NavPill href={`/projects/${projectId}`} active>
+          <NavPill href={{ pathname: '/projects/[id]', query: { id: projectId } }} active>
             Overview
           </NavPill>
-          <NavPill href={`/projects/${projectId}/files`}>
+          <NavPill href={{ pathname: '/projects/[id]/files', query: { id: projectId } }}>
             Files
           </NavPill>
-          <NavPill href={`/projects/${projectId}/review`}>
+          <NavPill href={{ pathname: '/projects/[id]/review', query: { id: projectId } }}>
             Review
           </NavPill>
-          <NavPill href={`/projects/${projectId}/settings`}>
+          <NavPill href={{ pathname: '/projects/[id]/settings', query: { id: projectId } }}>
             Settings
           </NavPill>
         </div>
@@ -370,7 +372,7 @@ export function ProjectDashboard({
             <CardTitle>Processing pipeline</CardTitle>
             <CardDescription>Monitor ingestion jobs, retry failures, and inspect progress.</CardDescription>
           </div>
-          <Link href={`/projects/${projectId}/review`}>
+          <Link href={{ pathname: '/projects/[id]/review', query: { id: projectId } }}>
             <Button variant="outline" size="sm" className="inline-flex items-center gap-2">
               <ListChecks className="h-4 w-4" />
               Open detailed dashboard
@@ -409,14 +411,24 @@ export function ProjectDashboard({
                     </div>
                     <div className="flex gap-2">
                       {ingestion.status === 'failed' && (
-                        <Link href={`/projects/${projectId}/review?retry=${ingestion.id}`}>
+                        <Link
+                          href={{
+                            pathname: '/projects/[id]/review',
+                            query: { id: projectId, retry: ingestion.id },
+                          }}
+                        >
                           <Button size="sm" variant="outline" className="text-red-600 border-red-200">
                             Retry job
                           </Button>
                         </Link>
                       )}
                       {(ingestion.status === 'succeeded' || ingestion.status === 'completed') && (
-                        <Link href={`/projects/${projectId}/review?ingestionId=${ingestion.id}`}>
+                        <Link
+                          href={{
+                            pathname: '/projects/[id]/review',
+                            query: { id: projectId, ingestionId: ingestion.id },
+                          }}
+                        >
                           <Button size="sm" variant="outline">
                             View output
                           </Button>
@@ -444,7 +456,10 @@ export function ProjectDashboard({
               <CardTitle>Recent files</CardTitle>
               <CardDescription>Latest uploads and their processing state.</CardDescription>
             </div>
-            <Link href={`/projects/${projectId}/files`} className="text-sm text-manthan-saffron-600 hover:text-manthan-saffron-700">
+            <Link
+              href={{ pathname: '/projects/[id]/files', query: { id: projectId } }}
+              className="text-sm text-manthan-saffron-600 hover:text-manthan-saffron-700"
+            >
               Manage files
             </Link>
           </CardHeader>
@@ -494,7 +509,10 @@ export function ProjectDashboard({
               <CardTitle>Generated outputs</CardTitle>
               <CardDescription>AI deliverables ready for review and export.</CardDescription>
             </div>
-            <Link href={`/projects/${projectId}/review`} className="text-sm text-manthan-saffron-600 hover:text-manthan-saffron-700">
+            <Link
+              href={{ pathname: '/projects/[id]/review', query: { id: projectId } }}
+              className="text-sm text-manthan-saffron-600 hover:text-manthan-saffron-700"
+            >
               Open review
             </Link>
           </CardHeader>
@@ -524,7 +542,7 @@ function OutputMetric({ label, value }: { label: string; value: number }) {
   )
 }
 
-function NavPill({ href, children, active = false }: { href: string; children: React.ReactNode; active?: boolean }) {
+function NavPill({ href, children, active = false }: { href: Route | UrlObject; children: React.ReactNode; active?: boolean }) {
   return (
     <Link
       href={href}
