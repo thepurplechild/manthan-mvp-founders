@@ -60,7 +60,7 @@ export function SignUpForm({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/confirm?next=/dashboard`,
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
           data: {
             full_name: fullName,
             acceptedRights: true
@@ -130,7 +130,7 @@ export function SignUpForm({
       const { error } = await supabase.auth.resend({
         type: 'signup',
         email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=/dashboard` },
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard` },
       } as unknown as { type: 'signup'; email: string; options: { emailRedirectTo: string } });
       if (error) throw error;
       setResendMsg('Verification email sent. Check your inbox and spam folder.');
