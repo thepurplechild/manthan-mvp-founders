@@ -707,12 +707,13 @@ async function loadProjectData(client: SupabaseClient, projectId: string): Promi
       const fallbackBucket = process.env.NEXT_PUBLIC_PROJECT_SCRIPTS_BUCKET ?? 'scripts'
       const { bucket, path } = deriveBucketAndPath(project.script_path, fallbackBucket)
       try {
-        const { data: signedData, error: signedError } = await storageClient.storage.from(bucket).createSignedUrl(path, 60 * 30)
+        const expiresInSeconds = 60 * 30
+        const { data: signedData, error: signedError } = await storageClient.storage.from(bucket).createSignedUrl(path, expiresInSeconds)
         if (signedError) {
           console.error('[founder-project-page] failed to sign script URL', signedError)
         } else if (signedData?.signedUrl) {
           result.scriptUrl = signedData.signedUrl
-          result.scriptExpiry = signedData.expiresAt ? new Date(signedData.expiresAt).toISOString() : null
+          result.scriptExpiry = new Date(Date.now() + expiresInSeconds * 1000).toISOString()
         }
       } catch (error) {
         console.error('[founder-project-page] unexpected storage error', error)
