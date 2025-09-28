@@ -1,15 +1,29 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createId } from '@paralleldrive/cuid2';
-import { getAdminClient } from '@/lib/supabase/admin';
+// Asynchronous job processor that runs every minute via cron
+// Processes queued jobs from the processing_jobs table one at a time
+// Implements exponential backoff retry logic and proper error handling
 
-const DEFAULT_BATCH_SIZE = Number(process.env.DEQUEUE_BATCH_SIZE || 5);
+import { NextRequest, NextResponse } from 'next/server';
+import { getAdminClient } from '@/lib/supabase/admin';
+import { ingestFile } from '@/lib/ingestion/core';
+import { callClaude, safeParseJSON } from '@/lib/ai/anthropic';
+import {
+  generatePitchPDF,
+  generatePitchPPTX,
+  generateSummaryDOCX,
+  type PitchData,
+} from '@/lib/generation/documents';
+import { generateVisualBrief, maybeGenerateImages } from '@/lib/generation/visuals';
+
+// Max execution time for this cron job (Vercel has 10 second limit on Hobby tier)
+const MAX_EXECUTION_TIME = 8000; // 8 seconds to leave buffer
 const CRON_SECRET = process.env.CRON_SECRET;
-const LOCK_TIMEOUT_MINUTES = Number(process.env.LOCK_TIMEOUT_MINUTES || 5);
+
+type ProcessingStep = 'extract_text' | 'generate_summary' | 'create_action_items' | 'finalize';
 
 function log(event: string, payload: Record<string, unknown>) {
   console.log(
     JSON.stringify({
-      scope: 'cron',
+      scope: 'job_processor',
       event,
       ts: new Date().toISOString(),
       ...payload,
@@ -17,302 +31,567 @@ function log(event: string, payload: Record<string, unknown>) {
   );
 }
 
-interface QueuedIngestion {
-  id: string;
-  user_id: string;
-  project_id: string | null;
-  status: string;
-  created_at: string;
-  updated_at: string;
+interface JobData {
+  job_id: string;
+  ingestion_id: string;
+  step: ProcessingStep;
+  payload: Record<string, unknown>;
 }
 
-async function acquireLock(supabase: ReturnType<typeof getAdminClient>, lockId: string): Promise<boolean> {
-  try {
-    const { data, error } = await supabase.rpc('acquire_processing_lock', {
-      p_lock_id: lockId,
-      p_locked_by: `cron-worker-${process.env.VERCEL_REGION || 'unknown'}`,
-      p_timeout_minutes: LOCK_TIMEOUT_MINUTES,
-    });
+// Extract text from uploaded file and store metadata
+async function processTextExtraction(supabase: ReturnType<typeof getAdminClient>, jobData: JobData): Promise<Record<string, unknown>> {
+  const { ingestion_id } = jobData;
 
-    if (error) {
-      log('lock_acquisition_error', { err: error.message });
-      return false;
-    }
+  log('text_extraction_start', { ingestion_id, job_id: jobData.job_id });
 
-    log('lock_acquisition_result', { acquired: data, lock_id: lockId });
-    return Boolean(data);
-  } catch (error) {
-    log('lock_acquisition_exception', {
-      err: error instanceof Error ? error.message : String(error),
-    });
-    return false;
+  // Get ingestion data
+  const { data: ingestion, error: ingestionError } = await supabase
+    .from('ingestions')
+    .select('*')
+    .eq('id', ingestion_id)
+    .single();
+
+  if (ingestionError || !ingestion) {
+    throw new Error(`Ingestion not found: ${ingestionError?.message}`);
   }
+
+  // Download file from storage
+  const { data: fileResponse, error: downloadError } = await supabase.storage
+    .from('scripts')
+    .download(ingestion.source_file_url);
+
+  if (downloadError || !fileResponse) {
+    throw new Error(`File download failed: ${downloadError?.message || 'No file response'}`);
+  }
+
+  const arrayBuffer = await fileResponse.arrayBuffer();
+  const scriptBuffer = Buffer.from(arrayBuffer);
+
+  // Process file using existing ingestion core
+  const result = await ingestFile(
+    ingestion.source_file_url.split('/').pop() || 'script',
+    scriptBuffer,
+    ingestion.mime_type || undefined,
+    { extractMetadata: true }
+  );
+
+  const extractedData = {
+    textContent: result.content?.textContent || '',
+    metadata: result.content?.metadata || {},
+    contentType: result.content?.contentType || 'unknown',
+    extractedAt: new Date().toISOString(),
+  };
+
+  log('text_extraction_complete', {
+    ingestion_id,
+    job_id: jobData.job_id,
+    text_length: extractedData.textContent.length
+  });
+
+  return extractedData;
 }
 
-async function releaseLock(supabase: ReturnType<typeof getAdminClient>, lockId: string): Promise<void> {
-  try {
-    const { data, error } = await supabase.rpc('release_processing_lock', {
-      p_lock_id: lockId,
-    });
+// Generate AI-powered summary and core elements
+async function generateSummary(supabase: ReturnType<typeof getAdminClient>, jobData: JobData): Promise<Record<string, unknown>> {
+  const { ingestion_id } = jobData;
 
-    if (error) {
-      log('lock_release_error', { err: error.message, lock_id: lockId });
+  log('summary_generation_start', { ingestion_id, job_id: jobData.job_id });
+
+  // Get extracted text from previous step
+  const { data: prevJob, error: prevJobError } = await supabase
+    .from('processing_jobs')
+    .select('result')
+    .eq('ingestion_id', ingestion_id)
+    .eq('step', 'extract_text')
+    .eq('status', 'succeeded')
+    .single();
+
+  if (prevJobError || !prevJob?.result) {
+    throw new Error(`Previous extraction step not found or failed: ${prevJobError?.message}`);
+  }
+
+  const extractedData = prevJob.result as any;
+  const scriptText = extractedData.textContent || '';
+
+  if (!scriptText) {
+    throw new Error('No text content available for summary generation');
+  }
+
+  let coreResult: Record<string, unknown> = {};
+
+  try {
+    if (process.env.ANTHROPIC_API_KEY && scriptText) {
+      const prompt = `You are given a screenplay or story text. Extract the following as strict JSON with keys: logline (string), synopsis (string, 2-4 paragraphs), themes (string[]), characters (array of objects with name and brief description). Respond ONLY with JSON and no prose.\n\nTEXT:\n${scriptText}`;
+
+      const { text } = await callClaude(
+        prompt,
+        'Extract core elements as JSON. Do not include extra commentary.',
+        1500
+      );
+
+      coreResult = safeParseJSON(text) || {};
     } else {
-      log('lock_released', { released: data, lock_id: lockId });
+      // Fallback when no API key
+      coreResult = {
+        logline: extractedData.metadata?.title || 'Untitled project logline pending',
+        synopsis: scriptText.slice(0, 1200),
+        themes: ['identity', 'family'],
+        characters: [],
+      };
     }
   } catch (error) {
-    log('lock_release_exception', {
-      err: error instanceof Error ? error.message : String(error),
-      lock_id: lockId,
+    log('ai_generation_error', {
+      ingestion_id,
+      job_id: jobData.job_id,
+      err: error instanceof Error ? error.message : String(error)
     });
+
+    // Use fallback
+    coreResult = {
+      logline: extractedData.metadata?.title || 'Untitled project logline pending',
+      synopsis: scriptText.slice(0, 1200),
+      themes: ['identity', 'family'],
+      characters: [],
+      fallbackUsed: true,
+    };
   }
+
+  log('summary_generation_complete', {
+    ingestion_id,
+    job_id: jobData.job_id,
+    has_logline: Boolean(coreResult.logline),
+    has_synopsis: Boolean(coreResult.synopsis)
+  });
+
+  return coreResult;
 }
 
-async function fetchQueuedJobs(supabase: ReturnType<typeof getAdminClient>, batchSize: number): Promise<QueuedIngestion[]> {
-  try {
-    const { data, error } = await supabase
-      .from('ingestions')
-      .select('id, user_id, project_id, status, created_at, updated_at')
-      .eq('status', 'queued')
-      .order('created_at', { ascending: true })
-      .limit(batchSize);
+// Create actionable insights and character development
+async function createActionItems(supabase: ReturnType<typeof getAdminClient>, jobData: JobData): Promise<Record<string, unknown>> {
+  const { ingestion_id } = jobData;
 
-    if (error) {
-      log('fetch_queued_jobs_error', { err: error.message });
-      return [];
+  log('action_items_start', { ingestion_id, job_id: jobData.job_id });
+
+  // Get summary from previous step
+  const { data: prevJob, error: prevJobError } = await supabase
+    .from('processing_jobs')
+    .select('result')
+    .eq('ingestion_id', ingestion_id)
+    .eq('step', 'generate_summary')
+    .eq('status', 'succeeded')
+    .single();
+
+  if (prevJobError || !prevJob?.result) {
+    throw new Error(`Previous summary step not found or failed: ${prevJobError?.message}`);
+  }
+
+  const coreResult = prevJob.result as any;
+
+  let bible: Record<string, unknown> = {};
+  let visualsOutput: Record<string, unknown> = {};
+  let marketAdaptation: Record<string, unknown> = {};
+
+  try {
+    // Generate character bible
+    if (process.env.ANTHROPIC_API_KEY) {
+      const { text } = await callClaude(
+        `Using the following core elements JSON, generate a CHARACTER_BIBLE as strict JSON with keys: characters (array of objects each with name, motivations, conflicts, relationships (array), arc, cultural_context). Respond ONLY with JSON.\n\nCORE_ELEMENTS_JSON:\n${JSON.stringify(coreResult)}`,
+        'Expand core elements into a detailed character bible as JSON.',
+        1500
+      );
+      bible = safeParseJSON(text) || {};
+    } else {
+      bible = {
+        characters: [
+          {
+            name: 'Protagonist',
+            motivations: ['prove self'],
+            conflicts: ['family pressure'],
+            arc: 'from doubt to purpose',
+          },
+        ],
+      };
     }
 
-    return data || [];
+    // Generate visual concepts
+    visualsOutput = await generateVisualBrief(coreResult as any);
+    visualsOutput.images = await maybeGenerateImages([]);
+
+    // Market adaptation (placeholder)
+    marketAdaptation = {
+      recommendations: [
+        { platform: 'Netflix', rationale: 'Strong family drama slate needs fresh voices' },
+        { platform: 'Amazon', rationale: 'Action beat resonates with current India Originals push' },
+      ],
+    };
+
   } catch (error) {
-    log('fetch_queued_jobs_exception', {
-      err: error instanceof Error ? error.message : String(error),
+    log('action_items_error', {
+      ingestion_id,
+      job_id: jobData.job_id,
+      err: error instanceof Error ? error.message : String(error)
     });
-    return [];
+
+    // Use fallbacks
+    bible = {
+      characters: [
+        {
+          name: 'Protagonist',
+          motivations: ['prove self'],
+          conflicts: ['family pressure'],
+          arc: 'from doubt to purpose',
+        },
+      ],
+      fallbackUsed: true,
+    };
+
+    visualsOutput = { concepts: [], fallbackUsed: true };
+
+    marketAdaptation = {
+      recommendations: [
+        { platform: 'Netflix', rationale: 'Strong family drama slate needs fresh voices' },
+      ],
+      fallbackUsed: true,
+    };
   }
+
+  const actionItems = {
+    characterBible: bible,
+    visualConcepts: visualsOutput,
+    marketRecommendations: marketAdaptation,
+    generatedAt: new Date().toISOString(),
+  };
+
+  log('action_items_complete', {
+    ingestion_id,
+    job_id: jobData.job_id,
+    character_count: bible.characters ? (bible.characters as any[]).length : 0
+  });
+
+  return actionItems;
 }
 
-async function markJobsAsRunning(supabase: ReturnType<typeof getAdminClient>, jobIds: string[]): Promise<string[]> {
-  if (jobIds.length === 0) return [];
+// Finalize processing with document generation
+async function finalizeProcessing(supabase: ReturnType<typeof getAdminClient>, jobData: JobData): Promise<Record<string, unknown>> {
+  const { ingestion_id } = jobData;
 
-  try {
-    const { data, error } = await supabase
-      .from('ingestions')
-      .update({
-        status: 'running',
-        updated_at: new Date().toISOString(),
-      })
-      .in('id', jobIds)
-      .eq('status', 'queued') // Only update if still queued (prevents race conditions)
-      .select('id');
+  log('finalization_start', { ingestion_id, job_id: jobData.job_id });
 
-    if (error) {
-      log('mark_jobs_running_error', { err: error.message, job_ids: jobIds });
-      return [];
-    }
+  // Get ingestion data
+  const { data: ingestion, error: ingestionError } = await supabase
+    .from('ingestions')
+    .select('*')
+    .eq('id', ingestion_id)
+    .single();
 
-    const updatedIds = (data || []).map(job => job.id);
-    log('marked_jobs_running', { updated_count: updatedIds.length, job_ids: updatedIds });
-    return updatedIds;
-  } catch (error) {
-    log('mark_jobs_running_exception', {
-      err: error instanceof Error ? error.message : String(error),
-      job_ids: jobIds,
-    });
-    return [];
+  if (ingestionError || !ingestion) {
+    throw new Error(`Ingestion not found: ${ingestionError?.message}`);
   }
-}
 
-async function markIngestionFailed(supabase: ReturnType<typeof getAdminClient>, ingestionId: string, message: string): Promise<void> {
+  // Get all previous job results
+  const { data: allJobs, error: jobsError } = await supabase
+    .from('processing_jobs')
+    .select('step, result')
+    .eq('ingestion_id', ingestion_id)
+    .eq('status', 'succeeded')
+    .in('step', ['extract_text', 'generate_summary', 'create_action_items']);
+
+  if (jobsError || !allJobs || allJobs.length < 3) {
+    throw new Error(`Previous processing steps incomplete: ${jobsError?.message}`);
+  }
+
+  const jobResults = allJobs.reduce((acc, job) => {
+    acc[job.step] = job.result;
+    return acc;
+  }, {} as Record<string, any>);
+
+  const extractedData = jobResults.extract_text;
+  const coreResult = jobResults.generate_summary;
+  const actionItems = jobResults.create_action_items;
+
   try {
+    // Prepare pitch data
+    const pitchData: PitchData = {
+      title:
+        ingestion.title ||
+        (coreResult.title as string | undefined) ||
+        ingestion.source_file_url.split('/').pop() ||
+        'Pitch Deck',
+      logline: (coreResult.logline as string) || '',
+      synopsis: (coreResult.synopsis as string) || '',
+      themes: (coreResult.themes as string[]) || [],
+      genres: (coreResult.genres as string[]) || [],
+      characters: (actionItems.characterBible?.characters as any) || [],
+      marketTags: (actionItems.marketRecommendations?.recommendations || []).map((r: any) => r.platform),
+    };
+
+    // Generate documents
+    const baseDir = `generated-assets/${ingestion.user_id}/${ingestion_id}`;
+    const [pdfBuffer, pptxBuffer, docxBuffer] = await Promise.all([
+      generatePitchPDF(pitchData),
+      generatePitchPPTX(pitchData),
+      generateSummaryDOCX(pitchData),
+    ]);
+
+    // Upload to storage
+    await Promise.all([
+      supabase.storage
+        .from('generated-assets')
+        .upload(`${baseDir}/pitch.pdf`, pdfBuffer, {
+          contentType: 'application/pdf',
+          upsert: true,
+        }),
+      supabase.storage
+        .from('generated-assets')
+        .upload(`${baseDir}/pitch.pptx`, pptxBuffer, {
+          contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          upsert: true,
+        }),
+      supabase.storage
+        .from('generated-assets')
+        .upload(`${baseDir}/summary.docx`, docxBuffer, {
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          upsert: true,
+        }),
+    ]);
+
+    const assets = {
+      pdf: `${baseDir}/pitch.pdf`,
+      pptx: `${baseDir}/pitch.pptx`,
+      docx: `${baseDir}/summary.docx`,
+    };
+
+    // Update ingestion to completed
     await supabase
       .from('ingestions')
       .update({
-        status: 'failed',
-        error: message,
+        status: 'completed',
+        progress: 100,
+        error: null,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', ingestionId);
+      .eq('id', ingestion_id);
 
-    log('marked_ingestion_failed', { ingestion_id: ingestionId, error: message });
-  } catch (error) {
-    log('mark_failed_error', {
-      ingestion_id: ingestionId,
-      err: error instanceof Error ? error.message : String(error),
+    log('finalization_complete', {
+      ingestion_id,
+      job_id: jobData.job_id,
+      assets_created: Object.keys(assets).length
     });
+
+    return {
+      ready: true,
+      assets,
+      completedAt: new Date().toISOString(),
+    };
+
+  } catch (error) {
+    log('document_generation_error', {
+      ingestion_id,
+      job_id: jobData.job_id,
+      err: error instanceof Error ? error.message : String(error)
+    });
+
+    // Still mark as completed but with error info
+    await supabase
+      .from('ingestions')
+      .update({
+        status: 'completed',
+        progress: 100,
+        error: `Document generation failed: ${error instanceof Error ? error.message : String(error)}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', ingestion_id);
+
+    return {
+      ready: true,
+      error: error instanceof Error ? error.message : String(error),
+      completedAt: new Date().toISOString(),
+    };
   }
 }
 
-async function invokeProcessor(origin: string, ingestionId: string): Promise<{ response: Response; text: string }> {
-  const url = `${origin}/api/ingestions/run`;
-  const body = JSON.stringify({ ingestionId, trigger: 'cron' });
-
-  log('invoking_processor', { ingestion_id: ingestionId, url });
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-cron-secret': CRON_SECRET || '',
-    },
-    body,
-  });
-
-  const text = await response.text();
-
-  log('processor_response', {
-    ingestion_id: ingestionId,
-    status: response.status,
-    ok: response.ok,
-    response_size: text.length,
-  });
-
-  return { response, text };
+// Main job processing function
+async function processJob(supabase: ReturnType<typeof getAdminClient>, jobData: JobData): Promise<Record<string, unknown>> {
+  switch (jobData.step) {
+    case 'extract_text':
+      return await processTextExtraction(supabase, jobData);
+    case 'generate_summary':
+      return await generateSummary(supabase, jobData);
+    case 'create_action_items':
+      return await createActionItems(supabase, jobData);
+    case 'finalize':
+      return await finalizeProcessing(supabase, jobData);
+    default:
+      throw new Error(`Unknown processing step: ${jobData.step}`);
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const start = Date.now();
-  const lockId = createId();
+  const startTime = Date.now();
+  const userAgent = request.headers.get('user-agent') || 'unknown';
 
-  log('cron_start', { lock_id: lockId, batch_size: DEFAULT_BATCH_SIZE });
+  log('cron_processor_start', {
+    user_agent: userAgent,
+    has_cron_secret: Boolean(CRON_SECRET),
+  });
 
+  // Verify cron authorization
   if (!CRON_SECRET) {
-    log('config_error', { message: 'CRON_SECRET not configured', has_secret: false });
-    return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+    log('config_error', { has_secret: false });
+    return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 });
   }
 
-  const providedSecret = request.headers.get('x-cron-secret') || request.headers.get('authorization')?.replace('Bearer ', '');
-  if (providedSecret !== CRON_SECRET) {
-    log('auth_failed', { origin: request.headers.get('user-agent') });
+  const headerSecret =
+    request.headers.get('x-cron-secret') ||
+    request.headers.get('authorization')?.replace('Bearer ', '') ||
+    '';
+
+  if (headerSecret !== CRON_SECRET) {
+    log('cron_auth_failed', {
+      provided: Boolean(headerSecret),
+      user_agent: userAgent,
+    });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const supabase = getAdminClient();
-  const origin = new URL(request.url).origin;
-
-  // Try to acquire the processing lock
-  const lockAcquired = await acquireLock(supabase, lockId);
-  if (!lockAcquired) {
-    log('lock_held', { lock_id: lockId });
-    return NextResponse.json({ ok: true, message: 'Lock held by another worker', lock_id: lockId });
-  }
+  let processedJobs = 0;
 
   try {
-    // Fetch queued jobs from the database
-    const queuedJobs = await fetchQueuedJobs(supabase, DEFAULT_BATCH_SIZE);
+    // Process jobs until we run out of time or jobs
+    while (Date.now() - startTime < MAX_EXECUTION_TIME) {
+      // Get next available job
+      const { data: jobData, error: jobError } = await supabase.rpc('get_next_processing_job');
 
-    if (queuedJobs.length === 0) {
-      // Check total pending count for logging
-      const { count } = await supabase
-        .from('ingestions')
-        .select('id', { count: 'exact' })
-        .eq('status', 'queued');
+      if (jobError) {
+        log('job_fetch_error', { err: jobError.message });
+        break;
+      }
 
-      log('queue_empty', { pending: count || 0 });
-      return NextResponse.json({ ok: true, processed: 0, pending: count || 0, lock_id: lockId });
-    }
+      if (!jobData || jobData.length === 0) {
+        log('no_jobs_available', { processed_count: processedJobs });
+        break;
+      }
 
-    log('found_queued_jobs', { count: queuedJobs.length });
+      const job = jobData[0] as JobData;
 
-    // Mark jobs as running (atomic operation to prevent race conditions)
-    const jobIds = queuedJobs.map(job => job.id);
-    const updatedJobIds = await markJobsAsRunning(supabase, jobIds);
+      log('processing_job_start', {
+        job_id: job.job_id,
+        ingestion_id: job.ingestion_id,
+        step: job.step,
+      });
 
-    if (updatedJobIds.length === 0) {
-      log('no_jobs_updated', { reason: 'All jobs may have been picked up by another worker' });
-      return NextResponse.json({ ok: true, processed: 0, message: 'No jobs updated', lock_id: lockId });
-    }
-
-    // Process each job by calling the processor endpoint
-    const results: Array<{ ingestionId: string; status: number; ok: boolean; error?: string }> = [];
-
-    for (const ingestionId of updatedJobIds) {
       try {
-        log('processing_job', { ingestion_id: ingestionId });
+        // Process the job
+        const result = await processJob(supabase, job);
 
-        // Make fire-and-forget call to the processor
-        const { response, text } = await invokeProcessor(origin, ingestionId);
-        results.push({
-          ingestionId,
-          status: response.status,
-          ok: response.ok,
-          error: response.ok ? undefined : text.slice(0, 200) // Truncate error for logging
+        // Mark job as succeeded
+        await supabase.rpc('update_processing_job_status', {
+          p_job_id: job.job_id,
+          p_status: 'succeeded',
+          p_result: result,
+          p_error_message: null,
         });
 
-        if (!response.ok) {
-          log('processor_rejected_job', {
-            ingestion_id: ingestionId,
-            status: response.status,
-            error: text.slice(0, 200),
-          });
+        // Update ingestion progress
+        const stepProgress = {
+          extract_text: 25,
+          generate_summary: 50,
+          create_action_items: 75,
+          finalize: 100,
+        };
 
-          // For non-retriable errors (4xx), mark as failed
-          if (response.status >= 400 && response.status < 500) {
-            await markIngestionFailed(supabase, ingestionId, text || 'Processor rejected job');
-          }
-          // For 5xx errors, leave as 'running' to be retried by another cron run
-        }
+        await supabase
+          .from('ingestions')
+          .update({
+            progress: stepProgress[job.step],
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', job.ingestion_id);
+
+        log('job_succeeded', {
+          job_id: job.job_id,
+          ingestion_id: job.ingestion_id,
+          step: job.step,
+          progress: stepProgress[job.step],
+        });
+
+        processedJobs++;
 
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        log('processor_error', {
-          ingestion_id: ingestionId,
+
+        log('job_failed', {
+          job_id: job.job_id,
+          ingestion_id: job.ingestion_id,
+          step: job.step,
           err: errorMessage,
         });
 
-        results.push({
-          ingestionId,
-          status: 500,
-          ok: false,
-          error: errorMessage
+        // Update job as failed or retrying
+        await supabase.rpc('update_processing_job_status', {
+          p_job_id: job.job_id,
+          p_status: 'retrying',
+          p_result: null,
+          p_error_message: errorMessage,
         });
 
-        // For network/infrastructure errors, leave the job in 'running' state
-        // so it can be retried by a future cron run or manual intervention
+        // Mark ingestion as failed if max retries exceeded
+        const { data: retriedJob } = await supabase
+          .from('processing_jobs')
+          .select('retry_count')
+          .eq('id', job.job_id)
+          .single();
+
+        if (retriedJob && retriedJob.retry_count >= 3) {
+          await supabase
+            .from('ingestions')
+            .update({
+              status: 'failed',
+              error: `Step '${job.step}' failed after 3 retries: ${errorMessage}`,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', job.ingestion_id);
+
+          log('ingestion_failed_max_retries', {
+            ingestion_id: job.ingestion_id,
+            step: job.step,
+            retry_count: retriedJob.retry_count,
+          });
+        }
       }
     }
 
-    const duration = Date.now() - start;
-    const successCount = results.filter(r => r.ok).length;
-    const errorCount = results.filter(r => !r.ok).length;
+    const totalDuration = Date.now() - startTime;
 
-    log('cron_complete', {
-      processed: updatedJobIds.length,
-      success: successCount,
-      errors: errorCount,
-      duration,
-      lock_id: lockId
+    log('cron_processor_complete', {
+      processed_jobs: processedJobs,
+      total_duration: totalDuration,
+      time_limit_reached: totalDuration >= MAX_EXECUTION_TIME,
     });
 
     return NextResponse.json({
       ok: true,
-      processed: updatedJobIds.length,
-      success: successCount,
-      errors: errorCount,
-      results: results.map(r => ({
-        ingestionId: r.ingestionId,
-        status: r.status,
-        ok: r.ok
-      })), // Exclude error details from response
-      duration,
-      lock_id: lockId
+      processedJobs,
+      duration: totalDuration,
+      message: `Processed ${processedJobs} jobs successfully`,
     });
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    log('cron_fatal_error', { err: errorMessage, lock_id: lockId });
+    const totalDuration = Date.now() - startTime;
+    const message = error instanceof Error ? error.message : 'Unknown processor error';
+
+    log('cron_processor_failed', {
+      err: message,
+      processed_jobs: processedJobs,
+      total_duration: totalDuration,
+    });
 
     return NextResponse.json({
-      error: 'Cron job failed',
-      message: errorMessage,
-      lock_id: lockId
+      error: message,
+      processedJobs,
+      duration: totalDuration
     }, { status: 500 });
-
-  } finally {
-    // Always release the lock
-    await releaseLock(supabase, lockId);
-
-    const totalDuration = Date.now() - start;
-    log('cron_finished', { total_duration: totalDuration, lock_id: lockId });
   }
 }
 
