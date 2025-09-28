@@ -1,0 +1,250 @@
+/* Project Review Page Specific Styles */
+
+/* Mobile-first responsive design */
+.project-review-container {
+  @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6;
+}
+
+/* Header section responsive layout */
+.project-review-header {
+  @apply flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4;
+}
+
+.project-review-title {
+  @apply text-2xl sm:text-3xl font-bold tracking-tight text-gray-900;
+}
+
+.project-review-description {
+  @apply text-sm sm:text-base text-gray-600;
+}
+
+/* Stats cards responsive grid */
+.project-stats-grid {
+  @apply grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4;
+}
+
+/* Tab navigation responsive */
+.project-tabs-list {
+  @apply grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 w-full;
+}
+
+.project-tab-trigger {
+  @apply flex items-center justify-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 text-xs sm:text-sm;
+}
+
+.project-tab-trigger svg {
+  @apply h-3 w-3 sm:h-4 sm:w-4;
+}
+
+/* Content areas responsive layout */
+.project-content-grid {
+  @apply grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6;
+}
+
+.project-main-content {
+  @apply lg:col-span-2 space-y-4 sm:space-y-6;
+}
+
+.project-sidebar {
+  @apply space-y-4 sm:space-y-6;
+}
+
+/* Script viewer responsive */
+.script-viewer {
+  @apply text-xs sm:text-sm bg-gray-50 p-3 sm:p-4 rounded-lg border font-mono whitespace-pre-wrap leading-relaxed;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+/* Processing steps responsive */
+.processing-step-card {
+  @apply border rounded-lg p-3 sm:p-4 hover:bg-gray-50 transition-colors;
+}
+
+.processing-step-header {
+  @apply flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4;
+}
+
+.processing-step-info {
+  @apply flex items-center gap-2 sm:gap-4 min-w-0;
+}
+
+.processing-step-title {
+  @apply font-semibold capitalize text-sm sm:text-base truncate;
+}
+
+.processing-step-description {
+  @apply text-xs sm:text-sm text-gray-600 mt-1 line-clamp-2;
+}
+
+.processing-step-timing {
+  @apply text-xs sm:text-sm text-blue-600 whitespace-nowrap;
+}
+
+/* Asset cards responsive */
+.asset-card-grid {
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4;
+}
+
+.asset-card {
+  @apply hover:shadow-md transition-shadow p-3 sm:p-4;
+}
+
+.asset-card-header {
+  @apply flex items-start justify-between gap-2;
+}
+
+.asset-card-info {
+  @apply flex items-center gap-2 sm:gap-3 min-w-0;
+}
+
+.asset-card-icon {
+  @apply p-1.5 sm:p-2 rounded;
+}
+
+.asset-card-title {
+  @apply font-medium text-sm sm:text-base truncate;
+}
+
+.asset-card-size {
+  @apply text-xs sm:text-sm text-gray-600;
+}
+
+.asset-card-actions {
+  @apply flex flex-col sm:flex-row gap-1 sm:gap-2;
+}
+
+/* Review section responsive */
+.review-action-buttons {
+  @apply flex flex-col sm:flex-row gap-3 sm:gap-4;
+}
+
+.review-action-button {
+  @apply flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm sm:text-base;
+}
+
+/* Feedback form responsive */
+.feedback-form {
+  @apply space-y-3 sm:space-y-4;
+}
+
+.feedback-textarea {
+  @apply resize-none text-sm sm:text-base;
+}
+
+.feedback-rating {
+  @apply flex gap-1 justify-center sm:justify-start;
+}
+
+/* Dialog responsive */
+.review-dialog-content {
+  @apply max-w-sm sm:max-w-2xl mx-4 sm:mx-auto;
+}
+
+.revision-categories-grid {
+  @apply grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3;
+}
+
+.revision-category-item {
+  @apply flex items-start space-x-2 p-2 sm:p-3 border rounded-lg hover:bg-gray-50;
+}
+
+.revision-category-label {
+  @apply text-xs sm:text-sm font-medium cursor-pointer;
+}
+
+.revision-category-description {
+  @apply text-xs text-gray-600;
+}
+
+/* Floating action panel responsive */
+.floating-action-panel {
+  @apply fixed bottom-4 sm:bottom-6 right-4 sm:right-6 w-72 sm:w-80 shadow-lg border-2 border-blue-200 bg-blue-50;
+}
+
+/* Loading states */
+.loading-spinner {
+  @apply w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin;
+}
+
+.loading-skeleton {
+  @apply animate-pulse bg-gray-200 rounded;
+}
+
+/* Accessibility improvements */
+.sr-only {
+  @apply absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0;
+}
+
+/* Focus styles for keyboard navigation */
+.focus-visible\:ring-2:focus-visible {
+  @apply ring-2 ring-blue-500 ring-offset-2;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .project-review-container {
+    @apply border border-gray-900;
+  }
+
+  .processing-step-card {
+    @apply border-gray-900;
+  }
+
+  .asset-card {
+    @apply border border-gray-900;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    @apply animate-none;
+  }
+
+  .animate-pulse {
+    @apply animate-none;
+  }
+
+  .transition-colors {
+    @apply transition-none;
+  }
+
+  .transition-shadow {
+    @apply transition-none;
+  }
+}
+
+/* Print styles */
+@media print {
+  .floating-action-panel {
+    @apply hidden;
+  }
+
+  .project-tabs-list {
+    @apply hidden;
+  }
+
+  .review-action-buttons {
+    @apply hidden;
+  }
+
+  .project-review-container {
+    @apply max-w-none px-0;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .script-viewer {
+    @apply bg-gray-800 text-gray-100 border-gray-700;
+  }
+
+  .processing-step-card {
+    @apply border-gray-700 hover:bg-gray-800;
+  }
+
+  .asset-card {
+    @apply border-gray-700;
+  }
+}
