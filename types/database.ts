@@ -19,6 +19,10 @@ export interface Project {
   target_platforms: string | null
   created_at: string
   profiles?: Profile
+  processing_status?: string | null
+  quality_score?: number | null
+  last_run_at?: string | null
+  updated_at?: string
 }
 
 export interface ScriptUpload {
@@ -28,6 +32,19 @@ export interface ScriptUpload {
   file_name: string | null
   file_size: number | null
   uploaded_at: string
+  mime_type: string | null
+  status: 'uploaded' | 'queued' | 'processing' | 'completed' | 'failed' | 'missing'
+  category: 'script' | 'document' | 'image' | 'other'
+  version: number
+  checksum: string | null
+  antivirus_status: 'pending' | 'scanning' | 'clean' | 'flagged' | 'failed'
+  antivirus_scanned_at: string | null
+  validation_status: 'pending' | 'passed' | 'failed'
+  validation_notes: string | null
+  storage_bucket: string
+  storage_exists: boolean
+  last_verified_at: string | null
+  updated_at: string
 }
 
 export interface GeneratedAsset {

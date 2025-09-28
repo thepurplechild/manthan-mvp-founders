@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Upload, CheckCircle, ArrowRight, ArrowLeft, AlertCircle } from 'lucide-react'
+import { Upload, CheckCircle, ArrowRight, ArrowLeft, AlertCircle, FileText } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 interface Project {
@@ -11,6 +11,48 @@ interface Project {
   title: string
   owner_id: string
   status: string
+}
+
+type FileStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'uploaded' | 'missing'
+
+interface RecentFile {
+  id: string
+  file_name: string
+  status: FileStatus
+  file_size: number | null
+  uploaded_at: string
+  ingestion_id: string | null
+  ingestion_progress: number | null
+  download_available: boolean
+}
+
+type ProjectFileApi = {
+  id: string
+  file_name: string
+  status: FileStatus
+  file_size: number | null
+  uploaded_at: string
+  ingestion_id: string | null
+  ingestion_progress: number | null
+  download_available: boolean | null
+}
+
+const statusLabelMap: Record<FileStatus, string> = {
+  queued: 'Queued',
+  processing: 'Processing',
+  completed: 'Completed',
+  failed: 'Failed',
+  uploaded: 'Uploaded',
+  missing: 'Missing',
+}
+
+const statusBadgeClasses: Record<FileStatus, string> = {
+  queued: 'bg-yellow-100 text-yellow-700',
+  processing: 'bg-blue-100 text-blue-700',
+  completed: 'bg-green-100 text-green-700',
+  failed: 'bg-red-100 text-red-700',
+  uploaded: 'bg-gray-100 text-gray-700',
+  missing: 'bg-red-100 text-red-700',
 }
 
 export default function ProjectUploadPage() {
@@ -34,6 +76,44 @@ export default function ProjectUploadPage() {
   const [pollInterval, setPollInterval] = useState(2000)
   const [retryCount, setRetryCount] = useState(0)
   const [maxRetries] = useState(5)
+
+  // Recent files state
+  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([])
+
+  // Load recent files
+  const loadRecentFiles = useCallback(async () => {
+    if (!projectId) return
+
+    try {
+      const supabase = createClient()
+
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) return
+
+      const response = await fetch(`/api/projects/${projectId}/files`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        const mapped: RecentFile[] = (data.files || []).slice(0, 3).map((file: ProjectFileApi) => ({
+          id: file.id,
+          file_name: file.file_name,
+          status: file.status,
+          file_size: file.file_size,
+          uploaded_at: file.uploaded_at,
+          ingestion_id: file.ingestion_id,
+          ingestion_progress: file.ingestion_progress ?? 0,
+          download_available: file.download_available !== false,
+        }))
+        setRecentFiles(mapped)
+      }
+    } catch (error) {
+      console.error('Failed to load recent files:', error)
+    }
+  }, [projectId])
 
   // Load project data
   useEffect(() => {
@@ -76,6 +156,9 @@ export default function ProjectUploadPage() {
         }
 
         setProject(projectData)
+
+        // Load recent files after project is loaded
+        loadRecentFiles()
       } catch (err) {
         console.error('Failed to load project:', err)
         setProjectError('Failed to load project')
@@ -87,7 +170,7 @@ export default function ProjectUploadPage() {
     if (projectId) {
       loadProject()
     }
-  }, [projectId])
+  }, [projectId, loadRecentFiles])
 
   // Status polling effect (same as original but with projectId context)
   useEffect(() => {
@@ -249,6 +332,9 @@ export default function ProjectUploadPage() {
       setIngestionId(j.ingestion_id)
       setStatus('queued')
       setProgress(10)
+
+      // Refresh recent files to show the newly uploaded file
+      loadRecentFiles()
     } catch (err) {
       console.error(`[project-upload] Network error for project ${project.id}:`, err)
       setError('Network error occurred')
@@ -443,9 +529,9 @@ export default function ProjectUploadPage() {
 
                 {/* Action Buttons */}
                 <div className="flex gap-4 justify-center">
-                  {isComplete && (
+                  {isComplete && ingestionId && (
                     <Link
-                      href={`/projects/${project?.id}/results?ingestionId=${ingestionId}` as any}
+                      href={`/projects/${project?.id}/results?ingestionId=${ingestionId}`}
                       className="btn-indian inline-flex items-center gap-3 text-lg px-8 py-4"
                     >
                       View AI Processing Results
@@ -476,6 +562,62 @@ export default function ProjectUploadPage() {
                       Try Again
                     </button>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Files Section */}
+          {recentFiles.length > 0 && (
+            <div className="mt-8">
+              <div className="card-indian p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-manthan-charcoal-800">
+                    Recent Files
+                  </h3>
+                  <Link
+                    href={`/projects/${project?.id}/files`}
+                    className="text-manthan-saffron-600 hover:text-manthan-saffron-700 text-sm font-medium"
+                  >
+                    View All Files →
+                  </Link>
+                </div>
+
+                <div className="space-y-3">
+                  {recentFiles.map((file) => (
+                    <div key={file.id} className="flex items-center justify-between p-3 bg-manthan-charcoal-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <FileText className="w-4 h-4 text-manthan-saffron-600" />
+                        <div>
+                          <div className="font-medium text-manthan-charcoal-800 text-sm">
+                            {file.file_name}
+                          </div>
+                          <div className="text-xs text-manthan-charcoal-600">
+                            {file.file_size ? `${Math.round(file.file_size / 1024)}KB` : 'Unknown size'} •
+                            {new Date(file.uploaded_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${statusBadgeClasses[file.status]}`}>
+                          {statusLabelMap[file.status]}
+                        </span>
+                        {(file.status === 'processing' || file.status === 'queued') && (
+                          <span className="text-xs text-manthan-charcoal-500">
+                            {file.ingestion_progress ?? 0}%
+                          </span>
+                        )}
+                        {file.status === 'completed' && file.ingestion_id && (
+                          <Link
+                            href={`/projects/${project?.id}/results?ingestionId=${file.ingestion_id}`}
+                            className="text-manthan-saffron-600 hover:text-manthan-saffron-700 text-xs"
+                          >
+                            View Results
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>

@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import {
   ThumbsUp,
-  ThumbsDown,
   MessageSquare,
   Send,
   Edit3,
@@ -14,8 +13,7 @@ import {
   Calendar,
   Star,
   AlertCircle,
-  RotateCcw,
-  Save
+  RotateCcw
 } from 'lucide-react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,7 +25,7 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 
-import { ProjectReviewData } from '@/app/projects/[id]/review/page'
+import type { ProjectReviewData } from '@/types/review'
 
 interface ReviewApprovalSectionProps {
   data: ProjectReviewData

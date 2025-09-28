@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 import { rateLimit } from '@/lib/rate-limit'
 import { enqueueIngestionJob } from '@/lib/jobs/queue'
 import { getAdminClient } from '@/lib/supabase/admin'
@@ -19,6 +19,45 @@ function log(event: string, payload: Record<string, unknown>) {
 
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
 const ACCEPTED = new Set(['application/pdf','text/plain','application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
+
+const inferMimeType = (file: File): string => {
+  if (file.type) return file.type
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  switch (extension) {
+    case 'pdf':
+      return 'application/pdf'
+    case 'txt':
+      return 'text/plain'
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    case 'doc':
+      return 'application/msword'
+    case 'png':
+      return 'image/png'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
+const inferCategory = (mimeType: string, fileName: string): 'script' | 'document' | 'image' | 'other' => {
+  if (mimeType.startsWith('image/')) return 'image'
+  if (mimeType === 'application/pdf') return 'document'
+  if (['text/plain', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword'].includes(mimeType)) {
+    return 'script'
+  }
+  const extension = fileName.split('.').pop()?.toLowerCase()
+  if (extension) {
+    if (['txt', 'md', 'fountain'].includes(extension)) return 'script'
+    if (['pdf'].includes(extension)) return 'document'
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension)) return 'image'
+  }
+  return 'other'
+}
+
+const computeChecksum = (buffer: Buffer): string => createHash('sha256').update(buffer).digest('hex')
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
@@ -161,7 +200,11 @@ export async function POST(req: NextRequest) {
 
   const arrayBuf = await file.arrayBuffer()
   const buffer = Buffer.from(arrayBuf)
+  const checksum = computeChecksum(buffer)
+  const mimeType = inferMimeType(file)
+  const category = inferCategory(mimeType, file.name)
   const id = randomUUID()
+  const nowIso = new Date().toISOString()
   // File extension extraction is done via file.name directly in path
   const path = `scripts/${user.id}/${id}/${file.name}`
 
@@ -170,11 +213,11 @@ export async function POST(req: NextRequest) {
     user_id: user.id,
     path,
     buffer_size: buffer.length,
-    content_type: file.type || 'application/octet-stream',
+    content_type: mimeType,
   });
 
   const uploadRes = await supabase.storage.from('scripts').upload(path, buffer, {
-    contentType: file.type || 'application/octet-stream',
+    contentType: mimeType,
     upsert: false,
   })
 
@@ -198,18 +241,36 @@ export async function POST(req: NextRequest) {
     user_id: user.id,
     project_id: projectId,
     source_file_url: path,
-    mime_type: file.type || null,
+    mime_type: mimeType,
     using_admin_client: true,
   });
 
   const adminSupabase = getAdminClient();
+
+  const { data: existingVersion, error: versionError } = await adminSupabase
+    .from('script_uploads')
+    .select('version')
+    .eq('project_id', projectId)
+    .eq('file_name', file.name)
+    .order('version', { ascending: false })
+    .limit(1)
+
+  if (versionError) {
+    log('script_upload_version_lookup_failed', {
+      user_id: user.id,
+      project_id: projectId,
+      error: versionError.message,
+    });
+  }
+
+  const nextVersion = ((existingVersion && existingVersion[0]?.version) || 0) + 1
 
   // Start database transaction by creating ingestion record
   const { data: ingestion, error } = await adminSupabase.from('ingestions').insert({
     user_id: user.id,
     project_id: projectId,
     source_file_url: path,
-    mime_type: file.type || null,
+    mime_type: mimeType,
     status: 'queued',
     progress: 0,
   }).select('*').single()
@@ -247,6 +308,55 @@ export async function POST(req: NextRequest) {
     created_at: ingestion.created_at,
     using_admin_client: true,
   });
+
+  // Also create a script_uploads record for backward compatibility and UI display
+  log('script_uploads_record_create_start', {
+    user_id: user.id,
+    project_id: projectId,
+    file_path: path,
+    file_name: file.name,
+    file_size: file.size,
+  });
+
+  const { data: scriptUpload, error: scriptUploadError } = await adminSupabase
+    .from('script_uploads')
+    .insert({
+      project_id: projectId,
+      file_path: path,
+      file_name: file.name,
+      file_size: file.size,
+      mime_type: mimeType,
+      status: 'queued',
+      category,
+      version: nextVersion,
+      checksum,
+      antivirus_status: 'pending',
+      validation_status: 'pending',
+      storage_bucket: 'scripts',
+      storage_exists: true,
+      last_verified_at: nowIso,
+      uploaded_at: nowIso,
+    })
+    .select('*')
+    .single();
+
+  if (scriptUploadError) {
+    log('script_uploads_record_create_failed', {
+      user_id: user.id,
+      project_id: projectId,
+      error: scriptUploadError.message,
+      error_code: scriptUploadError.code,
+    });
+    // Don't fail the entire upload for script_uploads creation errors
+    // The ingestion record is the primary source of truth
+  } else {
+    log('script_uploads_record_created', {
+      user_id: user.id,
+      script_upload_id: scriptUpload.id,
+      project_id: projectId,
+      file_path: path,
+    });
+  }
 
   const steps = [
     'script_preprocess',

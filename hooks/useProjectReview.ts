@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
-import { ProjectReviewData } from '@/app/projects/[id]/review/page'
+import { useState, useCallback, useRef, useEffect } from 'react'
+
+import { createClient } from '@/lib/supabase/client'
+import type { ProjectReviewData } from '@/types/review'
 
 interface RevisionRequest {
   feedback: string
@@ -13,6 +15,7 @@ interface RevisionRequest {
 interface UseProjectReviewReturn {
   data: ProjectReviewData
   isLoading: boolean
+  isRefreshing: boolean
   error: string | null
   updateProject: (updates: { title?: string; description?: string }) => Promise<void>
   approveProject: (feedback?: string) => Promise<void>
@@ -25,8 +28,10 @@ interface UseProjectReviewReturn {
 export function useProjectReview(initialData: ProjectReviewData): UseProjectReviewReturn {
   const [data, setData] = useState<ProjectReviewData>(initialData)
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const refreshTimeoutRef = useRef<NodeJS.Timeout>()
+  const realtimeChannelRef = useRef<ReturnType<typeof createClient>['channel'] | null>(null)
 
   const apiCall = useCallback(async (url: string, options: RequestInit = {}) => {
     const response = await fetch(url, {
@@ -46,9 +51,12 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
   }, [])
 
   const refreshData = useCallback(async () => {
-    if (isLoading) return // Prevent concurrent refreshes
+    if (isRefreshing) return
 
-    setIsLoading(true)
+    setIsRefreshing(true)
+    if (!isLoading) {
+      setIsLoading(true)
+    }
     setError(null)
 
     try {
@@ -60,8 +68,18 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
       console.error('Failed to refresh project data:', err)
     } finally {
       setIsLoading(false)
+      setIsRefreshing(false)
     }
-  }, [data.project.id, apiCall, isLoading])
+  }, [data.project.id, apiCall, isLoading, isRefreshing])
+
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimeoutRef.current) return
+
+    refreshTimeoutRef.current = setTimeout(async () => {
+      refreshTimeoutRef.current = undefined
+      await refreshData()
+    }, 400)
+  }, [refreshData])
 
   const updateProject = useCallback(async (updates: { title?: string; description?: string }) => {
     setError(null)
@@ -92,7 +110,7 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
     setError(null)
 
     try {
-      const result = await apiCall(`/api/projects/${data.project.id}/approve`, {
+      await apiCall(`/api/projects/${data.project.id}/approve`, {
         method: 'POST',
         body: JSON.stringify({
           feedback: feedback || null,
@@ -132,7 +150,7 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
     setError(null)
 
     try {
-      const result = await apiCall(`/api/projects/${data.project.id}/revisions`, {
+      await apiCall(`/api/projects/${data.project.id}/revisions`, {
         method: 'POST',
         body: JSON.stringify({
           ...revisions,
@@ -172,7 +190,7 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
     setError(null)
 
     try {
-      const result = await apiCall(`/api/projects/${data.project.id}/feedback`, {
+      await apiCall(`/api/projects/${data.project.id}/feedback`, {
         method: 'POST',
         body: JSON.stringify({
           feedback,
@@ -209,7 +227,7 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
     setError(null)
 
     try {
-      const result = await apiCall(`/api/jobs/${stepId}/retry`, {
+      await apiCall(`/api/jobs/${stepId}/retry`, {
         method: 'POST',
         body: JSON.stringify({
           force: true,
@@ -246,9 +264,43 @@ export function useProjectReview(initialData: ProjectReviewData): UseProjectRevi
     }
   }, [apiCall, refreshData])
 
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`project-review-${data.project.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ingestions', filter: `project_id=eq.${data.project.id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'generated_assets', filter: `project_id=eq.${data.project.id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'generated_content', filter: `project_id=eq.${data.project.id}` }, scheduleRefresh)
+      .subscribe()
+
+    realtimeChannelRef.current = channel
+
+    return () => {
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current)
+      }
+      realtimeChannelRef.current = null
+    }
+  }, [data.project.id, scheduleRefresh])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshData()
+    }, 90000)
+
+    return () => clearInterval(interval)
+  }, [refreshData])
+
+  useEffect(() => () => {
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current)
+    }
+  }, [])
+
   return {
     data,
     isLoading,
+    isRefreshing,
     error,
     updateProject,
     approveProject,

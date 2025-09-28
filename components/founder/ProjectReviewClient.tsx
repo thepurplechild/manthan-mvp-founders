@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import {
-  Edit2,
   FileText,
   Download,
   RefreshCw,
@@ -16,23 +15,19 @@ import {
   Settings,
   MessageSquare,
   ThumbsUp,
-  ThumbsDown,
-  RotateCcw
 } from 'lucide-react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 
-import { ProjectReviewData } from '@/app/projects/[id]/review/page'
+import type { ProjectReviewData } from '@/types/review'
 import { ProjectOverviewSection } from './ProjectOverviewSection'
 import { ScriptDisplaySection } from './ScriptDisplaySection'
 import { ProcessingStatusDashboard } from './ProcessingStatusDashboard'
 import { GeneratedAssetsSection } from './GeneratedAssetsSection'
+import { GeneratedContentSection } from './GeneratedContentSection'
 import { ReviewApprovalSection } from './ReviewApprovalSection'
 import { useProjectReview } from '@/hooks/useProjectReview'
 
@@ -44,6 +39,7 @@ export default function ProjectReviewClient({ initialData }: ProjectReviewClient
   const {
     data,
     isLoading,
+    isRefreshing,
     error,
     updateProject,
     approveProject,
@@ -55,6 +51,7 @@ export default function ProjectReviewClient({ initialData }: ProjectReviewClient
 
   const [activeTab, setActiveTab] = useState('overview')
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [showCompletionBanner, setShowCompletionBanner] = useState(false)
 
   // Auto-refresh for real-time updates
   useEffect(() => {
@@ -110,6 +107,12 @@ export default function ProjectReviewClient({ initialData }: ProjectReviewClient
     data.processing_steps.every(step =>
       step.status === 'completed' || step.status === 'skipped'
     )
+
+  useEffect(() => {
+    if (isCompleted) {
+      setShowCompletionBanner(true)
+    }
+  }, [isCompleted])
 
   if (error) {
     return (
@@ -180,6 +183,48 @@ export default function ProjectReviewClient({ initialData }: ProjectReviewClient
         </div>
       </div>
 
+      {isRefreshing && (
+        <div className="flex items-center gap-2 text-xs text-manthan-saffron-600">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          Syncing latest updates…
+        </div>
+      )}
+
+      {showCompletionBanner && (
+        <Card className="border border-green-200 bg-green-50">
+          <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="font-semibold text-green-800">Processing complete</p>
+              <p className="text-sm text-green-700">
+                Fresh AI outputs are ready for review. Jump into the review tab to approve or request revisions.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => setActiveTab('review')}>
+                Review now
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowCompletionBanner(false)}>
+                Dismiss
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {data.generated_assets.length === 0 && (
+        <Card className="border border-dashed border-manthan-saffron-200 bg-manthan-saffron-50">
+          <CardContent className="py-5 text-sm text-manthan-charcoal-700">
+            <p className="font-medium text-manthan-charcoal-900">New to the review workspace?</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>Upload a script in the Files tab to kick off AI processing.</li>
+              <li>Monitor real-time job progress in the Processing tab.</li>
+              <li>Once outputs appear, use the Content and Assets tabs to inspect deliverables.</li>
+              <li>Approve, request revisions, or leave feedback in the Review tab.</li>
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Quick Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
@@ -240,7 +285,7 @@ export default function ProjectReviewClient({ initialData }: ProjectReviewClient
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="overview" className="flex items-center gap-2">
             <Monitor className="h-4 w-4" />
             Overview
@@ -252,6 +297,10 @@ export default function ProjectReviewClient({ initialData }: ProjectReviewClient
           <TabsTrigger value="processing" className="flex items-center gap-2">
             <Settings className="h-4 w-4" />
             Processing
+          </TabsTrigger>
+          <TabsTrigger value="content" className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
+            Content
           </TabsTrigger>
           <TabsTrigger value="assets" className="flex items-center gap-2">
             <Download className="h-4 w-4" />
@@ -283,6 +332,14 @@ export default function ProjectReviewClient({ initialData }: ProjectReviewClient
           <ProcessingStatusDashboard
             data={data}
             onRetry={retryProcessing}
+            onRefresh={refreshData}
+            isLoading={isLoading}
+          />
+        </TabsContent>
+
+        <TabsContent value="content" className="space-y-6">
+          <GeneratedContentSection
+            data={data}
             onRefresh={refreshData}
             isLoading={isLoading}
           />

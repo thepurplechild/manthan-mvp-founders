@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
+import { loadProjectReviewData } from '@/lib/projects/review-data'
+
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
@@ -21,7 +23,7 @@ export async function GET(
           getAll() {
             return cookieStore.getAll()
           },
-          setAll(cookiesToSet) {
+          setAll() {
             // Server-side: cookies are read-only
           },
         },
@@ -51,68 +53,13 @@ export async function GET(
       )
     }
 
-    // Load project with all related data
-    const { data: project, error: projectError } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('id', id)
-      .single()
+    const reviewData = await loadProjectReviewData(supabase, id, user.id)
 
-    if (projectError || !project) {
+    if (!reviewData) {
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }
       )
-    }
-
-    // Load related data in parallel
-    const [
-      { data: ingestions },
-      { data: processing_steps },
-      { data: generated_assets },
-      { data: generated_content }
-    ] = await Promise.all([
-      supabase
-        .from('ingestions')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: false }),
-
-      supabase
-        .from('ai_processing_status')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: true }),
-
-      supabase
-        .from('generated_assets')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: false }),
-
-      supabase
-        .from('generated_content')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: false })
-    ])
-
-    // Mock approval status (would be real table in production)
-    const approval_status = {
-      approved: project.status === 'approved',
-      approved_at: project.status === 'approved' ? project.updated_at : null,
-      approved_by: project.status === 'approved' ? 'System' : null,
-      feedback: [],
-      revision_requests: []
-    }
-
-    const reviewData = {
-      project,
-      ingestions: ingestions || [],
-      processing_steps: processing_steps || [],
-      generated_assets: generated_assets || [],
-      generated_content: generated_content || [],
-      approval_status
     }
 
     return NextResponse.json(reviewData)
