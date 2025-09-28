@@ -19,17 +19,23 @@ function isAsset(pathname: string): boolean {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Skip middleware for assets and non-protected routes
+  // Skip middleware for assets
   if (isAsset(pathname)) {
     return NextResponse.next();
   }
 
-  // Only apply middleware to founder routes and other protected routes
+  // Define route types
   const isProtectedRoute = pathname.startsWith('/founder') ||
                           pathname.startsWith('/dashboard') ||
                           pathname.startsWith('/projects');
 
-  if (!isProtectedRoute) {
+  const isAuthRoute = pathname.startsWith('/auth/login') ||
+                     pathname.startsWith('/auth/sign-up') ||
+                     pathname.startsWith('/auth/callback') ||
+                     pathname === '/';
+
+  // Skip middleware for routes we don't need to handle
+  if (!isProtectedRoute && !isAuthRoute) {
     return NextResponse.next();
   }
 
@@ -57,10 +63,22 @@ export async function middleware(req: NextRequest) {
   );
 
   const { data: { session } } = await supabase.auth.getSession();
+
+  // Handle unauthenticated users
   if (!session) {
-    const loginUrl = new URL(LOGIN_PATH, req.url);
-    loginUrl.searchParams.set('redirect', redirectTarget);
-    return NextResponse.redirect(loginUrl);
+    // If trying to access protected routes, redirect to login
+    if (isProtectedRoute) {
+      const loginUrl = new URL(LOGIN_PATH, req.url);
+      loginUrl.searchParams.set('redirect', redirectTarget);
+      return NextResponse.redirect(loginUrl);
+    }
+    // If trying to access auth routes or root, allow (they need to login/signup)
+    return NextResponse.next();
+  }
+
+  // Handle authenticated users visiting auth routes - redirect to dashboard
+  if (isAuthRoute && pathname !== '/auth/callback') {
+    return NextResponse.redirect(new URL(NON_FOUNDER_REDIRECT, req.url));
   }
 
   // Skip rights acceptance check for the acceptance page itself
@@ -104,10 +122,17 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
+    // Protected routes
     '/founder/:path*',
     '/dashboard/:path*',
     '/projects/:path*',
+    '/protected/:path*',
+    // Auth routes that need redirect logic
+    '/auth/login',
+    '/auth/sign-up',
+    '/auth/callback',
     '/auth/accept-rights',
-    '/protected/:path*'
+    // Root route
+    '/'
   ],
 };
