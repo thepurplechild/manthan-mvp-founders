@@ -1,7 +1,4 @@
-flask>=3.0
-requests>=2.31
-supabase>=2.3
-python-docx>=0.8.11
-tenacity>=8.2
-pydantic>=2.5
-pytest>=7.4
+flask==3.0.3
+supabase==2.4.5
+anthropic==0.38.0
+requests==2.32.3
