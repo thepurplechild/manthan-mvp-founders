@@ -29,18 +29,19 @@ export async function middleware(req: NextRequest) {
                           pathname.startsWith('/dashboard') ||
                           pathname.startsWith('/projects');
 
-  const isAuthRoute = pathname.startsWith('/auth/login') ||
-                     pathname.startsWith('/auth/sign-up') ||
-                     pathname.startsWith('/auth/callback') ||
-                     pathname === '/';
+  // Auth routes that authenticated users should be redirected FROM (public auth pages)
+  const isPublicAuthRoute = pathname.startsWith('/auth/login') ||
+                           pathname.startsWith('/auth/sign-up');
+
+  // Auth callback route needs special handling
+  const isAuthCallbackRoute = pathname.startsWith('/auth/callback');
 
   // Skip middleware for routes we don't need to handle
-  if (!isProtectedRoute && !isAuthRoute) {
+  if (!isProtectedRoute && !isPublicAuthRoute && !isAuthCallbackRoute) {
     return NextResponse.next();
   }
 
   const redirectTarget = `${pathname}${req.nextUrl.search}`;
-  const url = req.nextUrl.clone();
 
   const cookieStore = await cookies();
   const response = NextResponse.next();
@@ -76,8 +77,8 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Handle authenticated users visiting auth routes - redirect to dashboard
-  if (isAuthRoute && pathname !== '/auth/callback') {
+  // Handle authenticated users visiting public auth routes - redirect to dashboard
+  if (isPublicAuthRoute) {
     return NextResponse.redirect(new URL(NON_FOUNDER_REDIRECT, req.url));
   }
 

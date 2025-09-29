@@ -1,5 +1,7 @@
-// Human-in-the-loop ingestion preprocessor endpoint. This endpoint only executes
-// the first step: file parsing and structural analysis. Requires CRON_SECRET header.
+// Human-in-the-loop ingestion pipeline endpoint. This endpoint executes the first TWO steps:
+// Step 1: File parsing and structural analysis (script_preprocess)
+// Step 2: Core elements extraction (core_extraction)
+// Then pauses for founder review and approval. Requires CRON_SECRET header.
 // Bypasses RLS using the Supabase service role key and must NEVER be exposed to end-users.
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -239,13 +241,13 @@ export async function POST(request: NextRequest) {
       size: scriptBuffer.length,
     });
 
-    // Execute ONLY the preprocessing step
+    // Execute STEP 1: File preprocessing (script_preprocess)
     await updateStep(supabase, ingestionId, 'script_preprocess', {
       status: 'running',
       started_at: new Date().toISOString(),
     });
 
-    log('preprocessing_execute', { ingestion_id: ingestionId });
+    log('step1_preprocessing_start', { ingestion_id: ingestionId });
 
     // Parse the file using the ingestion core
     const parseResult = await ingestFile(
@@ -257,7 +259,7 @@ export async function POST(request: NextRequest) {
 
     if (!parseResult.success) {
       const errorMsg = parseResult.error?.message || 'File parsing failed';
-      log('preprocessing_failed', { ingestion_id: ingestionId, err: errorMsg });
+      log('step1_preprocessing_failed', { ingestion_id: ingestionId, err: errorMsg });
 
       await updateStep(supabase, ingestionId, 'script_preprocess', {
         status: 'failed',
@@ -293,54 +295,168 @@ export async function POST(request: NextRequest) {
       output: preprocessOutput
     });
 
-    // Update ingestion to pending review for founder to trigger next step
+    log('step1_preprocessing_complete', {
+      ingestion_id: ingestionId,
+      text_length: preprocessOutput.textContent.length,
+    });
+
+    // Update progress after step 1
+    await supabase
+      .from('ingestions')
+      .update({
+        status: 'processing',
+        progress: 25,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', ingestionId);
+
+    // Execute STEP 2: Core elements extraction (core_extraction)
+    await updateStep(supabase, ingestionId, 'core_extraction', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    });
+
+    log('step2_core_extraction_start', { ingestion_id: ingestionId });
+
+    // Import AI step function
+    const { stepExtractElements } = await import('@/lib/ai/steps');
+
+    let coreExtractionOutput;
+    try {
+      coreExtractionOutput = await stepExtractElements(preprocessOutput.textContent);
+
+      log('step2_core_extraction_success', {
+        ingestion_id: ingestionId,
+        output_keys: Object.keys(coreExtractionOutput || {}),
+      });
+
+    } catch (extractError) {
+      const errorMsg = extractError instanceof Error ? extractError.message : 'Core extraction failed';
+      log('step2_core_extraction_failed', { ingestion_id: ingestionId, err: errorMsg });
+
+      await updateStep(supabase, ingestionId, 'core_extraction', {
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+        error: errorMsg
+      });
+
+      await supabase
+        .from('ingestions')
+        .update({
+          status: 'failed',
+          error: `Core extraction failed: ${errorMsg}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', ingestionId);
+
+      return NextResponse.json({ error: `Core extraction failed: ${errorMsg}` }, { status: 500 });
+    }
+
+    // Save core extraction output
+    await updateStep(supabase, ingestionId, 'core_extraction', {
+      status: 'succeeded',
+      finished_at: new Date().toISOString(),
+      output: {
+        ...coreExtractionOutput,
+        extractedAt: new Date().toISOString(),
+      }
+    });
+
+    log('step2_core_extraction_complete', {
+      ingestion_id: ingestionId,
+    });
+
+    // PAUSE: Update ingestion to pending_review after completing first TWO steps
+    // The founder must now review and approve before triggering step 3 (character_bible)
     await supabase
       .from('ingestions')
       .update({
         status: 'pending_review',
-        progress: 15,
+        progress: 40,
         updated_at: new Date().toISOString(),
       })
       .eq('id', ingestionId);
 
     const totalDuration = Date.now() - startTime;
 
-    log('preprocessing_complete', {
+    log('initial_pipeline_complete', {
       ingestion_id: ingestionId,
       total_duration: totalDuration,
-      text_length: preprocessOutput.textContent.length,
+      steps_completed: ['script_preprocess', 'core_extraction'],
+      next_step_requires_approval: 'character_bible',
     });
 
     return NextResponse.json({
       ok: true,
       ingestionId,
-      message: 'File preprocessing completed successfully. Ready for founder review.',
+      message: 'Initial pipeline completed successfully. Steps 1-2 done. Founder review required for step 3.',
       duration: totalDuration,
-      nextStep: 'core_extraction',
-      preprocessResult: {
-        textLength: preprocessOutput.textContent.length,
-        contentType: preprocessOutput.contentType,
-        warnings: preprocessOutput.warnings.length
+      stepsCompleted: ['script_preprocess', 'core_extraction'],
+      nextStep: 'character_bible',
+      requiresFounderApproval: true,
+      results: {
+        preprocessing: {
+          textLength: preprocessOutput.textContent.length,
+          contentType: preprocessOutput.contentType,
+          warnings: preprocessOutput.warnings.length
+        },
+        coreExtraction: {
+          extractedElements: Object.keys(coreExtractionOutput || {}).length,
+        }
       }
     });
 
   } catch (error) {
     const totalDuration = Date.now() - startTime;
-    const message = error instanceof Error ? error.message : 'Unknown preprocessing error';
+    const message = error instanceof Error ? error.message : 'Unknown pipeline error';
 
-    log('preprocessing_fatal_error', {
+    log('initial_pipeline_fatal_error', {
       ingestion_id: ingestionId,
       err: message,
       stack: error instanceof Error ? error.stack : undefined,
       total_duration: totalDuration,
     });
 
-    // Mark preprocessing step and ingestion as failed
-    await updateStep(supabase, ingestionId, 'script_preprocess', {
-      status: 'failed',
-      finished_at: new Date().toISOString(),
-      error: message
-    });
+    // Mark current steps and ingestion as failed
+    // Try to determine which step failed and mark appropriately
+    try {
+      // Check if preprocessing step is still running
+      const { data: preprocessStep } = await supabase
+        .from('ingestion_steps')
+        .select('status')
+        .eq('ingestion_id', ingestionId)
+        .eq('name', 'script_preprocess')
+        .single();
+
+      if (preprocessStep?.status === 'running') {
+        await updateStep(supabase, ingestionId, 'script_preprocess', {
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          error: message
+        });
+      }
+
+      // Check if core extraction step is running
+      const { data: coreStep } = await supabase
+        .from('ingestion_steps')
+        .select('status')
+        .eq('ingestion_id', ingestionId)
+        .eq('name', 'core_extraction')
+        .single();
+
+      if (coreStep?.status === 'running') {
+        await updateStep(supabase, ingestionId, 'core_extraction', {
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          error: message
+        });
+      }
+    } catch (updateError) {
+      log('step_cleanup_error', {
+        ingestion_id: ingestionId,
+        err: updateError instanceof Error ? updateError.message : 'Step cleanup failed'
+      });
+    }
 
     await supabase
       .from('ingestions')
