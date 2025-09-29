@@ -198,7 +198,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Unable to load generated outputs' }, { status: 500 })
     }
 
-    const scriptUploads = (scriptUploadsResult.data || []) as ScriptUpload[]
+    const scriptUploads = (scriptUploadsResult.data || []) as unknown as ScriptUpload[]
     const ingestionsRaw = (ingestionsResult.data || []) as RawIngestion[]
     const assets = (assetsResult.data || []) as RawGeneratedAsset[]
     const generatedContent = (contentResult.data || []) as RawGeneratedContent[]
@@ -230,16 +230,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return {
         id: upload.id,
         file_name: upload.file_name || upload.file_path.split('/').pop() || 'File',
-        version: upload.version,
-        status: upload.status,
-        category: upload.category,
+        version: (upload as any).version,
+        status: (upload as any).status,
+        category: (upload as any).category,
         uploaded_at: upload.uploaded_at,
         file_size: upload.file_size,
         ingestion_id: ingestion?.id ?? null,
         ingestion_status: ingestion?.status ?? null,
         ingestion_progress: ingestion?.progress ?? null,
-        storage_exists: upload.storage_exists,
-        last_verified_at: upload.last_verified_at ?? null,
+        storage_exists: (upload as any).storage_exists,
+        last_verified_at: (upload as any).last_verified_at ?? null,
       }
     })
 

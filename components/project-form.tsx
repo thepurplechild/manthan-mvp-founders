@@ -16,88 +16,12 @@
 
 import { useState } from 'react'
 import { FileUploader } from '@/components/file-uploader'
+import { createProject, type ActionResult } from '@/lib/actions/create-project'
 
 /**
  * Type definitions for form state management
  */
 type Step = 'metadata' | 'upload'
-
-type ActionResult =
-  | { success: true; projectId: string }
-  | { success: false; error: string }
-
-/**
- * Server Action for creating a new project
- * Handles database insertion and validation
- */
-async function createProject(formData: FormData): Promise<ActionResult> {
-  'use server'
-
-  try {
-    const { createClient } = await import('@/utils/supabase/server')
-    const { revalidatePath } = await import('next/cache')
-
-    // Extract and validate form data
-    const title = formData.get('title') as string
-    const logline = formData.get('logline') as string
-
-    if (!title || !title.trim()) {
-      return { success: false, error: 'Project title is required' }
-    }
-
-    if (!logline || !logline.trim()) {
-      return { success: false, error: 'Project logline is required' }
-    }
-
-    if (title.length > 200) {
-      return { success: false, error: 'Project title must be less than 200 characters' }
-    }
-
-    if (logline.length > 1000) {
-      return { success: false, error: 'Project logline must be less than 1000 characters' }
-    }
-
-    // Create server-side Supabase client
-    const supabase = await createClient()
-
-    // Get the current authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return { success: false, error: 'Authentication required. Please log in again.' }
-    }
-
-    // Insert new project into the database
-    const { data: project, error: insertError } = await supabase
-      .from('projects')
-      .insert({
-        owner_id: user.id,
-        title: title.trim(),
-        logline: logline.trim(),
-        status: 'draft'
-      })
-      .select('id')
-      .single()
-
-    if (insertError) {
-      console.error('Database insert error:', insertError)
-      return { success: false, error: 'Failed to create project. Please try again.' }
-    }
-
-    if (!project) {
-      return { success: false, error: 'Failed to create project. Please try again.' }
-    }
-
-    // Revalidate dashboard cache to show new project
-    revalidatePath('/dashboard')
-
-    return { success: true, projectId: project.id }
-
-  } catch (error) {
-    console.error('Unexpected error in createProject:', error)
-    return { success: false, error: 'An unexpected error occurred. Please try again.' }
-  }
-}
 
 /**
  * Project Form Component

@@ -75,10 +75,10 @@ export async function getUserProfile(): Promise<UserProfile | null> {
 
     // Type-safe return with explicit role typing
     return {
-      id: profile.id,
-      full_name: profile.full_name,
-      role: profile.role as 'creator' | 'founder', // Explicit type assertion for safety
-      created_at: profile.created_at,
+      id: (profile as any).id,
+      full_name: (profile as any).full_name,
+      role: (profile as any).role as 'creator' | 'founder', // Explicit type assertion for safety
+      created_at: (profile as any).created_at,
     }
 
   } catch (error) {

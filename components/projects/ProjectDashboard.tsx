@@ -486,7 +486,7 @@ export function ProjectDashboard({
                       <TableRow key={file.id}>
                         <TableCell className="font-medium">{file.file_name}</TableCell>
                         <TableCell>
-                          <Badge className={fileStatusStyles[file.status] || 'bg-gray-100 text-gray-700 border-gray-200'}>
+                          <Badge className={fileStatusStyles[file.status || 'unknown'] || 'bg-gray-100 text-gray-700 border-gray-200'}>
                             {file.status}
                           </Badge>
                         </TableCell>

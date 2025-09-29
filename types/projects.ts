@@ -47,8 +47,8 @@ export interface ProjectFileSummary {
   id: string
   file_name: string
   version: number
-  status: ScriptUpload['status']
-  category: ScriptUpload['category']
+  status: string | null
+  category: string | null
   uploaded_at: string
   file_size: number | null
   ingestion_id: string | null

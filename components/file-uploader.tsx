@@ -118,7 +118,7 @@ export function FileUploader({ projectId }: FileUploaderProps) {
       // Create a synthetic event for the file input handler
       const syntheticEvent = {
         target: { files: [file] }
-      } as React.ChangeEvent<HTMLInputElement>
+      } as unknown as React.ChangeEvent<HTMLInputElement>
 
       handleFileSelect(syntheticEvent)
     }

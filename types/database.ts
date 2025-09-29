@@ -338,3 +338,42 @@ export interface Database {
     }
   }
 }
+
+/**
+ * Convenience type exports for easier usage
+ */
+export type Project = Database['public']['Tables']['projects']['Row']
+export type ProjectInsert = Database['public']['Tables']['projects']['Insert']
+export type ProjectUpdate = Database['public']['Tables']['projects']['Update']
+
+export type Profile = Database['public']['Tables']['profiles']['Row']
+export type ProfileInsert = Database['public']['Tables']['profiles']['Insert']
+export type ProfileUpdate = Database['public']['Tables']['profiles']['Update']
+
+export type ScriptUpload = Database['public']['Tables']['script_uploads']['Row']
+export type ScriptUploadInsert = Database['public']['Tables']['script_uploads']['Insert']
+export type ScriptUploadUpdate = Database['public']['Tables']['script_uploads']['Update']
+
+export type GeneratedAsset = Database['public']['Tables']['generated_assets']['Row']
+export type GeneratedAssetInsert = Database['public']['Tables']['generated_assets']['Insert']
+export type GeneratedAssetUpdate = Database['public']['Tables']['generated_assets']['Update']
+
+export type Ingestion = Database['public']['Tables']['ingestions']['Row']
+export type IngestionInsert = Database['public']['Tables']['ingestions']['Insert']
+export type IngestionUpdate = Database['public']['Tables']['ingestions']['Update']
+
+export type IngestionStep = Database['public']['Tables']['ingestion_steps']['Row']
+export type IngestionStepInsert = Database['public']['Tables']['ingestion_steps']['Insert']
+export type IngestionStepUpdate = Database['public']['Tables']['ingestion_steps']['Update']
+
+export type Package = Database['public']['Tables']['packages']['Row']
+export type PackageInsert = Database['public']['Tables']['packages']['Insert']
+export type PackageUpdate = Database['public']['Tables']['packages']['Update']
+
+export type PlatformMandate = Database['public']['Tables']['platform_mandates']['Row']
+export type PlatformMandateInsert = Database['public']['Tables']['platform_mandates']['Insert']
+export type PlatformMandateUpdate = Database['public']['Tables']['platform_mandates']['Update']
+
+export type DealPipeline = Database['public']['Tables']['deal_pipeline']['Row']
+export type DealPipelineInsert = Database['public']['Tables']['deal_pipeline']['Insert']
+export type DealPipelineUpdate = Database['public']['Tables']['deal_pipeline']['Update']
